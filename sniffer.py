@@ -360,7 +360,7 @@ def on_publish(client, userdata, msgid, *rest):
             client.publish("f/i/state/dsi", data, qos=1)
 
         # case block to handle bulk cases where active, code, target is 0,1,hbw respectively
-        case 39 | 43 | 48 | 50 | 53 | 54 | 56 | 58 | 60 | 61 | 69 | 71 | 72 | 73 | 80 | 81 | 86:
+        case 39 | 43 | 48 | 50 | 52 | 53 | 54 | 56 | 58 | 60 | 61 | 69 | 71 | 72 | 73 | 80 | 81 | 86:
             if msgid == 50:
                 time.sleep(1.7)
             if msgid == 54:
@@ -442,6 +442,8 @@ def on_publish(client, userdata, msgid, *rest):
             # and immediately sends out its state that it has become inactive
             data = state(0, 1, "", "vgr", "hbw")
             client.publish("f/i/state/vgr", data, qos=1)
+
+        # After ack 86, I don't seem to care anymore
 
         # case to send f/i/state/vgr information every 10 seconds when there is no process to fufill in FL
         case _:
