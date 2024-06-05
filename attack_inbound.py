@@ -231,12 +231,10 @@ def state(active, code, description="", station="vgr", target=None):
     if target is None:
         data = '{\n\t"active" : %s,\n\t"code" : %s,\n\t"description" : "%s",\n\t' \
                '"station" : "%s",\n\t' % (active, code, description, station)
-        print(data)
         data += new_ts()
     else:
         data = '{\n\t"active" : %s,\n\t"code" : %s,\n\t"description" : "%s",\n\t' \
            '"station" : "%s",\n\t"target" : "%s",\n\t' % (active, code, description, station, target)
-        print(data)
         data += new_ts()
     return data
 
