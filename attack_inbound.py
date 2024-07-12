@@ -253,9 +253,6 @@ def on_publish(client, userdata, msgid, *rest):
     global start_inbound_attack
     msgid_sim = client.user_data_get()
 
-    if start_inbound_attack is True:
-        client.user_data_set(33)
-
     match msgid_sim:
         case 8:
             time.sleep(0.4)
@@ -315,6 +312,7 @@ def on_publish(client, userdata, msgid, *rest):
             client.publish("f/i/order", data, qos=1)
             client.user_data_set(client.user_data_get() + 1)
 
+
         case 17:
             data = '{\n\t"history" : null,\n\t' + new_ts()[:-2] + ',\n\t"workpiece" : \n\t{\n\t\t"id" : "",\n\t\t' \
                    '"state" : "RAW",\n\t\t"type" : "NONE"\n\t}\n}'
@@ -371,7 +369,7 @@ def on_publish(client, userdata, msgid, *rest):
 
 
         # case block to handle bulk cases where active, code, target is 0,1,hbw respectively
-        case 39 | 43 | 48 | 50 | 52 | 53 | 54 | 56 | 58 | 60 | 61 | 69 | 71 | 72 | 73 | 80 | 81 | 86:
+        case 39 | 48 | 50 | 52 | 53 | 54 | 56 | 58 | 60 | 61 | 69 | 71 | 72 | 73 | 80 | 81 | 86:
             if msgid_sim == 50:
                 time.sleep(1.7)
             if msgid_sim == 54:
@@ -397,12 +395,21 @@ def on_publish(client, userdata, msgid, *rest):
             client.publish("f/i/state/vgr", data, qos=1)
             client.user_data_set(client.user_data_get() + 1)
 
+        case 43:
+            data = state(0, 1, "", "vgr", "hbw")
+            client.publish("f/i/state/vgr", data, qos=1)
+            client.user_data_set(client.user_data_get() + 1)
+            print("user_data 43", client.user_data_get())
+
+
     # case block to handle bulk cases where active, code, target is 1,2,hbw respectively
         case 40 | 42 | 47 | 49 | 51 | 55 | 57 | 59 | 67 | 68 | 70 | 79:
             if msgid_sim == 49:
                 time.sleep(0.5)
             if msgid_sim == 68:
                 time.sleep(6)
+            if msgid_sim == 42:
+                print("user_data 42", client.user_data_get())
             data = state(1, 2, "", "vgr", "hbw")
             client.publish("f/i/state/vgr", data, qos=1)
             client.user_data_set(client.user_data_get() + 1)
@@ -412,16 +419,17 @@ def on_publish(client, userdata, msgid, *rest):
             data = state(0, 1, "", "vgr", "hbw")
             client.publish("f/i/state/vgr", data, qos=1)
             client.user_data_set(client.user_data_get() + 1)
+            print("user_data 41", client.user_data_get())
 
         case 44:
             data = state(1, 1, "", "dsi")
             client.publish("f/i/state/dsi", data, qos=1)
             client.user_data_set(client.user_data_get() + 1)
 
-        case 45:
-            data = state(0, 1, "", "dso")
-            client.publish("f/i/state/dso", data, qos=1)
-            client.user_data_set(client.user_data_get() + 1)
+        # case 45:
+        #     data = state(0, 1, "", "dso")
+        #     client.publish("f/i/state/dso", data, qos=1)
+        #     client.user_data_set(client.user_data_get() + 1)
 
         case 46:
             time.sleep(1.5)
