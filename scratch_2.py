@@ -45,7 +45,7 @@ def packet_process(packet):
         # tcp_ack = random.randint(1111111111,2222222222)
         tcp_ack = random.randint(0, 2**32 - 1)
         tcp3way_ack_resp = scapy.IP(src=dst_ip, dst=src_ip) / scapy.TCP(sport=dst_port, dport=src_port, seq=tcp_ack, ack=tcp_seq+1, flags="SA")
-        scapy.send(tcp3way_ack_resp)
+        scapy.send(tcp3way_ack_resp, verbose=False)
         # print("TCP Ack sent for 3way")
 
     elif scapy_packet[scapy.IP].dst == "192.168.0.10" and scapy_packet[scapy.IP].dport == 1883 and scapy_packet.haslayer(mqtt.MQTTConnect):
@@ -53,14 +53,14 @@ def packet_process(packet):
         src_ip, dst_ip, src_port, dst_port, tcp_seq, tcp_ack, tcp_payload_len, _ = packet_attr
 
         forged_tcp_ack = scapy.IP(src=dst_ip, dst=src_ip) / scapy.TCP(sport=dst_port, dport=src_port, seq=tcp_ack, ack=tcp_seq + tcp_payload_len, flags="A")
-        scapy.send(forged_tcp_ack)
+        scapy.send(forged_tcp_ack, verbose=False)
 
         # Send a forged PUBACK to sender
         forged_mqtt_resp = scapy.IP(src=dst_ip, dst=src_ip) / scapy.TCP(sport=dst_port, dport=src_port, seq=tcp_ack,
                                                                         ack=tcp_seq + tcp_payload_len,
                                                                         flags="PA") / mqtt.MQTT(
             type=2) / mqtt.MQTTConnack()
-        scapy.send(forged_mqtt_resp)
+        scapy.send(forged_mqtt_resp, verbose=False)
         # print("Forged packet sent for ConnAck")
 
     elif scapy_packet[scapy.IP].dst == "192.168.0.10" and scapy_packet[scapy.IP].dport == 1883 and scapy_packet.haslayer(
@@ -70,7 +70,7 @@ def packet_process(packet):
 
         forged_tcp_ack = scapy.IP(src=dst_ip, dst=src_ip) / scapy.TCP(sport=dst_port, dport=src_port, seq=tcp_ack,
                                                                       ack=tcp_seq + tcp_payload_len, flags="A")
-        scapy.send(forged_tcp_ack)
+        scapy.send(forged_tcp_ack, verbose=False)
 
         if mqtt_msgid == 1:
 
@@ -79,7 +79,7 @@ def packet_process(packet):
                                                                             ack=tcp_seq + tcp_payload_len,
                                                                             flags="PA") / mqtt.MQTT(
                 type=9, QOS=1) / mqtt.MQTTSuback(msgid=1)
-            scapy.send(forged_mqtt_resp)
+            scapy.send(forged_mqtt_resp, verbose=False)
 
 
         elif src_ip == "192.168.0.13":
@@ -89,7 +89,7 @@ def packet_process(packet):
             forged_mqtt_resp = scapy.IP(src=dst_ip, dst=src_ip) / scapy.TCP(sport=dst_port, dport=src_port, seq=tcp_ack,
                                                                             ack=tcp_seq + tcp_payload_len,
                                                                             flags="PA") / scapy.Raw(load=raw_mqtt_load)
-            scapy.send(forged_mqtt_resp)
+            scapy.send(forged_mqtt_resp, verbose=False)
 
         elif src_ip == "192.168.0.12":
             raw_mqtt_load = "90 03 00 02 01 90 03 00 03 01"
@@ -97,7 +97,7 @@ def packet_process(packet):
             forged_mqtt_resp = scapy.IP(src=dst_ip, dst=src_ip) / scapy.TCP(sport=dst_port, dport=src_port, seq=tcp_ack,
                                                                             ack=tcp_seq + tcp_payload_len,
                                                                             flags="PA") / scapy.Raw(load=raw_mqtt_load)
-            scapy.send(forged_mqtt_resp)
+            scapy.send(forged_mqtt_resp, verbose=False)
             # print("Forged packet sent for SubAck")
 
     elif scapy_packet[scapy.IP].dst == "192.168.0.10" and scapy_packet[scapy.IP].dport == 1883 and scapy_packet.haslayer(mqtt.MQTTPublish):
@@ -107,12 +107,12 @@ def packet_process(packet):
 
         # send tcp ack
         forged_tcp_ack = scapy.IP(src=dst_ip, dst=src_ip) / scapy.TCP(sport=dst_port, dport=src_port, seq=tcp_ack, ack=tcp_seq+tcp_payload_len, flags="A")
-        scapy.send(forged_tcp_ack)
+        scapy.send(forged_tcp_ack, verbose=False)
 
         # Send a forged PUBACK to sender
         forged_mqtt_resp = scapy.IP(src=dst_ip, dst=src_ip) / scapy.TCP(sport=dst_port, dport=src_port, seq=tcp_ack, ack=tcp_seq+tcp_payload_len, flags="PA") / mqtt.MQTT(
             type=4, QOS=1) / mqtt.MQTTPuback(msgid=mqtt_msgid)
-        scapy.send(forged_mqtt_resp)
+        scapy.send(forged_mqtt_resp, verbose=False)
         # print("Forged packet sent for PubAck")
 
 
@@ -145,7 +145,7 @@ def packet_process(packet):
         # send tcp ack
         forged_tcp_ack = scapy.IP(src=dst_ip, dst=src_ip) / scapy.TCP(sport=dst_port, dport=src_port, seq=tcp_ack,
                                                                       ack=tcp_seq+tcp_payload_len, flags="A")
-        scapy.send(forged_tcp_ack)
+        scapy.send(forged_tcp_ack, verbose=False)
 
     else:
         pass
