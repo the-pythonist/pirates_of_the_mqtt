@@ -27,7 +27,7 @@ dst_port = 1883
 
 order_color = None
 wp_id = None
-
+wp_location = None
 
 def broker():
     ss = netfilterqueue.NetfilterQueue()
@@ -88,13 +88,15 @@ def new_ts():
 
 
 def retrieve_from_stock(color, stock):
-    global wp_id
+    global wp_id, wp_location
     stock = stock.decode("utf-8")
 
     data = json.loads(stock)
 
     for item in reversed(data['stockItems']):
         if item['workpiece'] and item['workpiece']['type'] == color:
+            wp_location = item['location']
+            print("wp location is", wp_location)
             wp_id = item['workpiece']['id']
             item['workpiece'] = None
             break
@@ -328,7 +330,7 @@ def on_publish(client, userdata, msgid, *rest):
             data = state(1, 2, "", "hbw")
             client.publish("f/i/state/hbw", data, qos=1)
 
-            globs.state_hbw = "BUSY"
+            # globs.state_hbw = "BUSY"
             # ----------------
             client.user_data_set(50)
 
@@ -394,7 +396,7 @@ def on_publish(client, userdata, msgid, *rest):
             data = state(1, 2, "", "hbw")
             client.publish("f/i/state/hbw", data, qos=1)
 
-            globs.state_hbw = "BUSY"
+            # globs.state_hbw = "BUSY"
             # ----------------
 
             client.user_data_set(59)
@@ -539,8 +541,6 @@ def on_message(client, userdata, mqttmsg):
 
     if mqttmsg.topic == "f/o/order":
         globs.on_message_event_trigger = True
-        threads_list['manual_on_message_trigger'][thread_counter['manual_on_message_trigger']].start()
-        logger.info("Order received from Dashboard via broker")
 
         # set hbw to BUSY
         globs.state_hbw = "BUSY"
@@ -556,6 +556,10 @@ def on_message(client, userdata, mqttmsg):
         logger.info("Retrieving order WP from Stock")
         _ = globs.hbw_stock
         globs.hbw_stock = retrieve_from_stock(order_color, _)
+
+        threads_list['manual_on_message_trigger'][thread_counter['manual_on_message_trigger']].start()
+        logger.info("Order received from Dashboard via broker")
+
 
         client.user_data_set("33d")
 
@@ -598,11 +602,15 @@ def publish_state_10_seconds():
     #
     # while globs.send_state_every_10_seconds_trigger is True:
     #     if globs.state_vgr == "NOT_BUSY" or globs.state_vgr is None:
+    #         print("vgr state")
     #         data = state(0, 1, "", "vgr", "hbw")
-    #         mqtt_connect.publish("f/i/state/vgr", data, qos=1)
-    #         # time.sleep(6.6)
+    #         aa = mqtt_connect.publish("f/i/state/vgr", data, qos=1)
+    #         aa.wait_for_publish()
+    #         # time.sleep(5.5)
+    #
     #
     #     if globs.state_hbw == "NOT_BUSY" or globs.state_hbw is None:
+    #         print("hbw state")
     #         # -----------------------
     #         data = state(0, 1, "", "hbw")
     #         mqtt_connect.publish("f/i/state/hbw", data, qos=1)
@@ -610,17 +618,22 @@ def publish_state_10_seconds():
     #         while globs.hbw_stock is None:
     #             continue
     #         data = globs.hbw_stock
-    #         mqtt_connect.publish("f/i/stock", data, qos=1)
+    #         bb = mqtt_connect.publish("f/i/stock", data, qos=1)
+    #         bb.wait_for_publish()
     #         # -----------------------
     #         # time.sleep(3.3)
     #
     #     if globs.state_mpo == "NOT_BUSY" or globs.state_mpo is None:
+    #         print("mpo state")
     #         data = state(0, 1, "", "mpo")
-    #         mqtt_connect.publish("f/i/state/mpo", data, qos=1)
+    #         cc = mqtt_connect.publish("f/i/state/mpo", data, qos=1)
+    #         cc.wait_for_publish()
     #
     #     if globs.state_sld == "NOT_BUSY" or globs.state_sld is None:
+    #         print("sld state")
     #         data = state(0, 1, "", "sld")
-    #         mqtt_connect.publish("f/i/state/sld", data, qos=1)
+    #         dd = mqtt_connect.publish("f/i/state/sld", data, qos=1)
+    #         dd.wait_for_publish()
     #
     #     time.sleep(10)
 
@@ -628,8 +641,8 @@ def publish_state_10_seconds():
  to transit from the end of (fetching WP from) HBW, to the start of MPO, to end of MPO, and finally to the start SLD.
  Each workpiece will have different times"""
 # template is {"workpiece location": ["hbw/ack", "mpo/ack code 1", "mpo/ack code 2", "sld/ack"]}
-dict_ = {"C1": [27, 49, 95, 104],}
-
+dict_ = {"B2": [35, 57, 103, 112], "C1": [27, 49, 95, 104], "C3": [42, 64, 110, 119], "B1": [27, 49, 95, 102], "A1": [27, 49, 95, 102]}
+# we simply need to add more locations and times to the above dict after analysing/recording more packets. B1 and A1 are simply dups of C1 for POC sake
 
 def manual_on_message_trigger():
     program_start_time = int("{:.0f}".format(time.perf_counter()))
@@ -637,7 +650,7 @@ def manual_on_message_trigger():
     while globs.on_message_event_trigger is True:
         check = int("{:.0f}".format(time.perf_counter()))
 
-        if check - program_start_time == dict_["C1"][3]:
+        if check - program_start_time == dict_[wp_location][3]:
             # trigger fl/sld/ack
             oops = paho.mqtt.client.MQTTMessage(0, b"fl/sld/ack")
             oops.payload = b'{"code": 2}'
@@ -645,21 +658,21 @@ def manual_on_message_trigger():
             logger.debug("Manual trigger for fl/sld/ack initiated")
             globs.on_message_event_trigger = False
 
-        elif check - program_start_time == dict_["C1"][2]:
+        elif check - program_start_time == dict_[wp_location][2]:
             # trigger fl/mpo/ack, code 2
             oops = paho.mqtt.client.MQTTMessage(0, b"fl/mpo/ack")
             oops.payload = b'{"code": 2}'
             on_message(mqtt_connect, None, oops)
             logger.debug("Manual trigger for fl/mpo/ack with code 2 initiated")
 
-        elif check - program_start_time == dict_["C1"][1]:
+        elif check - program_start_time == dict_[wp_location][1]:
             # trigger fl/mpo/ack, code 1
             oops = paho.mqtt.client.MQTTMessage(0, b"fl/mpo/ack")
             oops.payload = b'{"code": 1}'
             on_message(mqtt_connect, None, oops)
             logger.debug("Manual trigger for fl/mpo/ack with code 1 initiated")
 
-        elif check - program_start_time == dict_["C1"][0]:
+        elif check - program_start_time == dict_[wp_location][0]:
             # trigger fl/hbw/ack
             oops = paho.mqtt.client.MQTTMessage(0, b"fl/hbw/ack")
             oops.payload = b'{"code": 1}'
