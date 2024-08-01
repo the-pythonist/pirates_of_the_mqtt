@@ -1,0 +1,4 @@
+# ignore pcaps dir containing recorded packets
+pcaps*
+__*
+.idea*
