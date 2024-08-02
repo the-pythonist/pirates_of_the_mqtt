@@ -4,13 +4,15 @@ import pyshark
 import threading
 import asyncio
 
+IP_ADDRESS = '192.168.0.10'
+PORT = 1883
 
 # function to begin live capturing
-def live_capture(iface="Wi-Fi", out_file="test.pcapng"):
+def live_capture(iface="Wi-Fi", out_file="C1.pcapng"):
     new_loop = asyncio.new_event_loop()
     asyncio.set_event_loop(new_loop)
 
-    capture = pyshark.LiveCapture(interface=iface, output_file=out_file)
+    capture = pyshark.LiveCapture(interface=iface, output_file=out_file, bpf_filter="port 1883")
     capture.sniff()
 
 
@@ -29,7 +31,7 @@ time.sleep(2)
 mqtt_connect = paho.Client(paho.CallbackAPIVersion.VERSION2, client_id='mqtt_client_1askldhfkashetui', clean_session=True, protocol=paho.MQTTv31)
 mqtt_connect.max_inflight_messages_set(1)
 # mqtt_connect.username_pw_set('txt', 'xtx')  # turns out connection happens without username/password
-mqtt_connect.connect(host='test.mosquitto.org', port=1883, keepalive=120)
+mqtt_connect.connect(host=IP_ADDRESS, port=PORT, keepalive=120)
 
 mqtt_connect.on_connect = on_connect
 

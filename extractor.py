@@ -5,7 +5,7 @@ import pyshark
 import re
 
 SQL_DB_PATH = "fl_mqtt.sqlite"
-
+PCAPS_PATH = r"C:\Users\gadaw\PycharmProjects\test\fischer\pcaps"
 
 def create_table(wp_location):
     # initialize database
@@ -14,8 +14,8 @@ def create_table(wp_location):
 
     # create table based on the workpiece location
     cursor.execute(f"""CREATE TABLE IF NOT EXISTS {wp_location}(
-                    time_delta_from_first                TEXT,
                     time_delta_from_previous TEXT,
+                    mqtt_qos            TEXT,
                     mqtt_topic          TEXT,
                     mqtt_payload        TEXT,
                     source_ip           TEXT)""")
@@ -26,13 +26,13 @@ def create_table(wp_location):
     conn.commit()
     conn.close()
 
-def insert_to_table(wp_location, delta_time_from_first, delta_time_from_previous, mqtt_topic, mqtt_msg, source_ip):
+def insert_to_table(wp_location, delta_time_from_previous, mqtt_qos, mqtt_topic, mqtt_msg, source_ip):
     conn = sqlite3.connect(SQL_DB_PATH)
     cursor = conn.cursor()
 
     # begin insertion
-    cursor.execute(f"""INSERT INTO {wp_location} (time_delta_from_first, time_delta_from_previous, mqtt_topic, mqtt_payload, source_ip) 
-                        VALUES (?, ?, ?, ?, ?)""", (delta_time_from_first, delta_time_from_previous, mqtt_topic, mqtt_msg, source_ip))
+    cursor.execute(f"""INSERT INTO {wp_location} (time_delta_from_previous, mqtt_qos, mqtt_topic, mqtt_payload, source_ip) 
+                        VALUES (?, ?, ?, ?, ?)""", (delta_time_from_previous, mqtt_qos, mqtt_topic, mqtt_msg, source_ip))
     conn.commit()
     conn.close()
 
@@ -59,20 +59,24 @@ def extract_mqtt_packets(path_to_packets):
                     order_packet_timestamp = previous_packet_ts = round(float(each_packet.sniff_timestamp), 3)
 
                 if is_order_packet_recorded:
-                    # calculate delta time of each packet from f/o/order (first) packet
-                    delta_time = round(float(each_packet.sniff_timestamp), 3) - order_packet_timestamp
-                    delta_time = round(delta_time, 3)
+                    for each_mqtt_layer in list(filter(lambda layer: layer.layer_name == "mqtt", each_packet.layers)):  ###
+                        # qos=0 originates as publishes directly from SSC/broker (not clients) which we don't care about
+                        if each_mqtt_layer.qos == '0':
+                            continue
+                        # calculate delta time of each packet from f/o/order (first) packet
+                        delta_time = round(float(each_packet.sniff_timestamp), 3) - order_packet_timestamp
+                        delta_time = round(delta_time, 3)
 
-                    # calculate delta time of each packet from previous packet
-                    delta_time_from_previous = round(float(each_packet.sniff_timestamp), 3) - previous_packet_ts
-                    delta_time_from_previous = round(delta_time_from_previous, 3)
-                    # now update the previous_packet_ts with current packet ts
-                    previous_packet_ts = round(float(each_packet.sniff_timestamp), 3)
+                        # calculate delta time of each packet from previous packet
+                        delta_time_from_previous = round(float(each_packet.sniff_timestamp), 3) - previous_packet_ts
+                        delta_time_from_previous = round(delta_time_from_previous, 3)
+                        # now update the previous_packet_ts with current packet ts
+                        previous_packet_ts = round(float(each_packet.sniff_timestamp), 3)
 
-                    # convert message mqtt payload to string and store in overall list
-                    _mqtt_msg_to_string = str(each_packet.mqtt.msg).replace(":","")
-                    _mqtt_msg_to_string = bytes.fromhex(_mqtt_msg_to_string).decode('utf-8')
-                    mqtt_poi.append([delta_time, delta_time_from_previous, str(each_packet.mqtt.topic), _mqtt_msg_to_string, each_packet.ip.src])
+                        # convert message mqtt payload to string and store in overall list
+                        _mqtt_msg_to_string = str(each_mqtt_layer.msg).replace(":","")  ### changed each_packet.mqtt to each_mqtt_layer
+                        _mqtt_msg_to_string = bytes.fromhex(_mqtt_msg_to_string).decode('utf-8')    ###
+                        mqtt_poi.append([delta_time_from_previous, str(each_mqtt_layer.qos), str(each_mqtt_layer.topic), _mqtt_msg_to_string, each_packet.ip.src])   ### changed each_packet.mqtt to each_mqtt_layer
 
 
             except AttributeError:
@@ -84,5 +88,7 @@ def extract_mqtt_packets(path_to_packets):
         [insert_to_table(_, *x) for x in mqtt_poi]
         print("Done")
 
+        read_pcap.close()
 
-extract_mqtt_packets(r"C:\Users\gadaw\PycharmProjects\test\pcaps")
+
+extract_mqtt_packets(PCAPS_PATH)
