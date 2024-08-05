@@ -50,16 +50,15 @@ def extract_mqtt_packets(path_to_packets):
         previous_packet_ts = None
 
         for each_packet in read_pcap:
-
             try:
-                if each_packet.mqtt.topic == "f/o/order" and each_packet.mqtt.msgtype == '3':
-                    is_order_packet_recorded = True
+                for each_mqtt_layer in list(filter(lambda layer: layer.layer_name == "mqtt", each_packet.layers)):  ###
+                    if each_mqtt_layer.topic == "f/o/order" and each_mqtt_layer.msgtype == '3':
+                        is_order_packet_recorded = True
 
-                    # record the time f/o/order was seen and then record subsequent packets relative from this
-                    order_packet_timestamp = previous_packet_ts = round(float(each_packet.sniff_timestamp), 3)
+                        # record the time f/o/order was seen and then record subsequent packets relative from this
+                        order_packet_timestamp = previous_packet_ts = round(float(each_packet.sniff_timestamp), 3)
 
-                if is_order_packet_recorded:
-                    for each_mqtt_layer in list(filter(lambda layer: layer.layer_name == "mqtt", each_packet.layers)):  ###
+                    if is_order_packet_recorded:
                         # qos=0 originates as publishes directly from SSC/broker (not clients) which we don't care about
                         if each_mqtt_layer.qos == '0':
                             continue
@@ -78,8 +77,7 @@ def extract_mqtt_packets(path_to_packets):
                         _mqtt_msg_to_string = bytes.fromhex(_mqtt_msg_to_string).decode('utf-8')    ###
                         mqtt_poi.append([delta_time_from_previous, str(each_mqtt_layer.qos), str(each_mqtt_layer.topic), _mqtt_msg_to_string, each_packet.ip.src])   ### changed each_packet.mqtt to each_mqtt_layer
 
-
-            except AttributeError:
+            except AttributeError as error:
                 continue
 
         # create table if necessary & insert extraction from each pcap file to database

