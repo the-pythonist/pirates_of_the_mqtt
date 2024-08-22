@@ -3,9 +3,20 @@ import os
 import glob
 import pyshark
 import re
+import argparse
+import sys
 
-SQL_DB_PATH = "fl_mqtt.sqlite"
-PCAPS_PATH = r"C:\Users\gadaw\PycharmProjects\test\fischer\pcaps"
+# Include Argparse for easy execution via shell
+parser = argparse.ArgumentParser(prog="extractor", description= "Script to begin extracting necessary information from MQTT packets for Rogue client attack",\
+    usage=f"python3 {sys.argv[0]} [OPTIONS]", epilog="Enjoy! :)")
+
+parser.add_argument("--pcaps_path", "-pp", type=str, required=False, default="%s/pcaps" % os.getcwd(), metavar="FOLDER_PATH", help="path to folder containing recorded .pcap files")
+parser.add_argument("--out_dbfile", "-o", type=str, required=False, default=f"{os.getcwd()}/fl_mqtt.sqlite", metavar="FILE_PATH", help="file path to store the database")
+
+args = parser.parse_args()
+PCAPS_PATH = args.pcaps_path
+SQL_DB_PATH = args.out_dbfile
+
 
 def create_table(wp_location):
     # initialize database
@@ -38,7 +49,7 @@ def insert_to_table(wp_location, delta_time_from_previous, mqtt_qos, mqtt_topic,
 
 
 def extract_mqtt_packets(path_to_packets):
-    for pcap_file in glob.glob(r'%s\*' % path_to_packets):
+    for pcap_file in glob.glob('%s/*' % path_to_packets):
         mqtt_poi = []
 
         read_pcap = pyshark.FileCapture(input_file=pcap_file, display_filter='mqtt and mqtt.msgtype == 3')

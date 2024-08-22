@@ -3,16 +3,33 @@ import paho.mqtt.client as paho
 import pyshark
 import threading
 import asyncio
+import argparse
+import sys
+import os
 
-IP_ADDRESS = '192.168.0.10'
-PORT = 1883
+
+# Include Argparse for easy execution via shell
+parser = argparse.ArgumentParser(prog="sniff_mqtt", description= "Script to begin sniffing MQTT packets",\
+    usage=f"python3 {sys.argv[0]} -i INTERFACE [OPTIONS]", epilog="Enjoy! :)")
+
+parser.add_argument("--interface", "-i", type=str, required=True, metavar="INTERFACE", help="specify interface to use for traffic collection")
+parser.add_argument("--broker_ip", "-b", type=str, required=False, default="192.168.0.10", metavar="IP_ADDRESS", help="broker IP address to connect to")
+parser.add_argument("--broker_port", "-p", type=str, required=False, default=1883, metavar="PORT", help="broker port to connect to, default is 1883")
+parser.add_argument("--outfile", "-o", type=str, required=False, default=f"{os.getcwd()}/C1.pcapng", metavar="FILE_PATH", help="file to output traffic capture to")
+
+args = parser.parse_args()
+IP_ADDRESS = args.broker_ip
+PORT = args.broker_port
+INTERFACE = args.interface
+OUTFILE = args.outfile
+
 
 # function to begin live capturing
-def live_capture(iface="Wi-Fi", out_file="C1.pcapng"):
+def live_capture(iface=INTERFACE, out_file=OUTFILE):
     new_loop = asyncio.new_event_loop()
     asyncio.set_event_loop(new_loop)
 
-    capture = pyshark.LiveCapture(interface=iface, output_file=out_file, bpf_filter="port 1883")
+    capture = pyshark.LiveCapture(interface=iface, output_file=out_file, bpf_filter="port %s" % PORT)
     capture.sniff()
 
 
