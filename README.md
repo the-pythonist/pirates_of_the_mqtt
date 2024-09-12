@@ -1,6 +1,6 @@
-# Topic Placeholder
+# Pirates of the MQTT: Raiding IIoT Systems with a Rogue Client
 
-**Topic Placeholder**
+**Pirates of the MQTT: Raiding IIoT Systems with a Rogue Client**
 
 Case study using Fischertechnik's Lernfabrik 4.0 (9V).
 
